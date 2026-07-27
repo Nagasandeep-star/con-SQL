@@ -1,0 +1,53 @@
+{
+  "dataset": "spider",
+  "metrics": {
+    "total": 1034,
+    "exact_match": 74,
+    "exact_match_pct": 7.16,
+    "execution_correct": 545,
+    "execution_pct_overall": 52.71,
+    "execution_pct_attempted": 62.72,
+    "ex_attempted": 869,
+    "join_path_correct": 0,
+    "join_path_pct": 0.0,
+    "valid_query_rate": 77.37,
+    "per_complexity": {
+      "aggregation queries": {
+        "total": 549,
+        "EM (%)": 6.74,
+        "EX (%)": 53.73,
+        "VQR (%)": 81.06
+      },
+      "single-table": {
+        "total": 252,
+        "EM (%)": 12.3,
+        "EX (%)": 61.51,
+        "VQR (%)": 83.33
+      },
+      "nested queries": {
+        "total": 97,
+        "EM (%)": 6.19,
+        "EX (%)": 47.42,
+        "VQR (%)": 58.76
+      },
+      "2-table joins": {
+        "total": 108,
+        "EM (%)": 0.0,
+        "EX (%)": 37.96,
+        "VQR (%)": 65.74
+      },
+      "3-table joins": {
+        "total": 22,
+        "EM (%)": 0.0,
+        "EX (%)": 36.36,
+        "VQR (%)": 59.09
+      },
+      "4+ table joins": {
+        "total": 6,
+        "EM (%)": 0.0,
+        "EX (%)": 0.0,
+        "VQR (%)": 66.67
+      }
+    }
+  }
+}

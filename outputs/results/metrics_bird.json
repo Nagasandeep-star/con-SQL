@@ -1,0 +1,53 @@
+{
+  "dataset": "MINIDEV",
+  "metrics": {
+    "total": 500,
+    "exact_match": 3,
+    "exact_match_pct": 0.6,
+    "execution_correct": 42,
+    "execution_pct_overall": 8.4,
+    "execution_pct_attempted": 15.22,
+    "ex_attempted": 276,
+    "join_path_correct": 0,
+    "join_path_pct": 0.0,
+    "valid_query_rate": 48.8,
+    "per_complexity": {
+      "aggregation queries": {
+        "total": 248,
+        "EM (%)": 0.0,
+        "EX (%)": 7.26,
+        "VQR (%)": 52.82
+      },
+      "single-table": {
+        "total": 34,
+        "EM (%)": 8.82,
+        "EX (%)": 23.53,
+        "VQR (%)": 67.65
+      },
+      "nested queries": {
+        "total": 20,
+        "EM (%)": 0.0,
+        "EX (%)": 5.0,
+        "VQR (%)": 50.0
+      },
+      "2-table joins": {
+        "total": 149,
+        "EM (%)": 0.0,
+        "EX (%)": 8.05,
+        "VQR (%)": 42.28
+      },
+      "3-table joins": {
+        "total": 41,
+        "EM (%)": 0.0,
+        "EX (%)": 4.88,
+        "VQR (%)": 34.15
+      },
+      "4+ table joins": {
+        "total": 8,
+        "EM (%)": 0.0,
+        "EX (%)": 12.5,
+        "VQR (%)": 37.5
+      }
+    }
+  }
+}
