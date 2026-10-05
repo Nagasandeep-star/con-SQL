@@ -71,7 +71,7 @@ class BIRDMiniDevLoader:
                 f"\n[ERROR] BIRD Mini-Dev files not found:\n" +
                 "\n".join(f"  {p}" for p in missing)
             )
-        logger.info("✅ All BIRD Mini-Dev files found.")
+        logger.info("[OK] All BIRD Mini-Dev files found.")
 
     def load_schemas(self) -> Dict[str, Schema]:
         """Load all 11 BIRD Mini-Dev database schemas."""
@@ -85,11 +85,11 @@ class BIRDMiniDevLoader:
             schema = self._parse_schema(raw)
             self.schemas[schema.db_id] = schema
 
-        logger.info(f"✅ Loaded {len(self.schemas)} BIRD Mini-Dev schemas.")
+        logger.info(f"[OK] Loaded {len(self.schemas)} BIRD Mini-Dev schemas.")
         return self.schemas
 
     def _parse_schema(self, raw: dict) -> Schema:
-        """Parse BIRD schema — same format as Spider."""
+        """Parse BIRD schema -- same format as Spider."""
         db_id = raw["db_id"]
 
         tables = []
@@ -183,7 +183,7 @@ class BIRDMiniDevLoader:
             samples.append(sample)
 
         self.dev_samples = samples
-        logger.info(f"✅ Loaded {len(samples)} BIRD Mini-Dev samples.")
+        logger.info(f"[OK] Loaded {len(samples)} BIRD Mini-Dev samples.")
         return self.dev_samples
     def load(self):
         """

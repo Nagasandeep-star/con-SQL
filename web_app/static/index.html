@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="ConSQL: Graph-Guided Relational Context Optimization for Large Language Model Based Text-to-SQL Generation">
+  <meta name="color-scheme" content="dark">
+  <title>ConSQL — Next-Gen Real-Time Text-to-SQL Studio</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Vis.js for Interactive Network Graph -->
+  <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+
+  <!-- Chart.js for Benchmark Analytics -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- React 18 & ReactDOM (for React Bits Components) -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+  <!-- React Bits LatticeLoader Component Stylesheet -->
+  <link rel="stylesheet" href="/static/components/LatticeLoader/LatticeLoader.css">
+
+  <!-- Application Stylesheet -->
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <!-- Animated Background Grid -->
+  <div class="grid-bg-overlay"></div>
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <div class="app-container">
+    <!-- Navbar -->
+    <header class="navbar">
+      <a href="#" class="nav-brand">
+        <div class="brand-icon">⚡</div>
+        <div class="brand-text">
+          <h1>ConSQL <span class="brand-badge">v2.0 Real-Time</span></h1>
+          <p>Graph-Guided Relational Context Optimization</p>
+        </div>
+      </a>
+
+      <div class="nav-status">
+        <div class="status-indicator" id="navLatticeContainer">
+          <div id="navLatticeMount"></div>
+        </div>
+        <div class="status-indicator">
+          <span>Engine: <strong id="statusBackend">Connecting...</strong></span>
+        </div>
+        <div class="status-indicator">
+          <span>📚 Databases: <strong id="statusDbCount">Loading...</strong></span>
+        </div>
+        <div class="status-indicator">
+          <span>💻 Device: <strong id="statusDevice">CPU</strong></span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Hero Header -->
+    <section class="hero">
+      <div class="hero-tag">✨ Advanced Constraint-Guided Optimization</div>
+      <h2>Next-Gen Real-Time Text-to-SQL Studio</h2>
+      <p>
+        Transform complex natural language questions into executable, semantically verified SQL queries using SBERT schema linking, dynamic FK graph synthesis, and multi-objective join path pruning.
+      </p>
+    </section>
+
+    <!-- Query Studio Panel -->
+    <section class="glass-panel">
+      <div class="query-box-wrapper">
+        <div class="query-input-group">
+          <textarea
+            id="queryInput"
+            class="query-textarea"
+            placeholder="Type your natural language query (e.g. 'List all singers and the concerts they performed in.')"
+            rows="3"
+          ></textarea>
+        </div>
+
+        <div class="controls-row">
+          <!-- Database Selector -->
+          <div class="select-group">
+            <label for="dbSelect">Database Target</label>
+            <select id="dbSelect" class="custom-select">
+              <option value="concert_singer">concert_singer (Spider)</option>
+            </select>
+          </div>
+
+          <!-- Provider & Model Selector -->
+          <div class="select-group">
+            <label for="providerSelect">LLM Synthesis Provider</label>
+            <select id="providerSelect" class="custom-select">
+              <option value="mock">Pipeline Candidate Preview (Local Heuristic)</option>
+              <option value="gemini">Google Gemini 2.5 Pro (Cloud API)</option>
+              <option value="openai">OpenAI GPT-4o (Cloud API)</option>
+              <option value="ollama">Ollama Qwen2.5-Coder (Local LLM)</option>
+            </select>
+          </div>
+
+          <!-- Adaptive QCE Switch -->
+          <div class="select-group" style="display:flex; flex-direction:column; justify-content:center;">
+            <label>Adaptive QCE</label>
+            <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; margin-top:4px;">
+              <input type="checkbox" id="qceToggle" checked style="accent-color:var(--primary); width:16px; height:16px;">
+              <span>Dynamic Beam Budget</span>
+            </label>
+          </div>
+
+          <!-- Buttons -->
+          <div style="display:flex; gap:10px; align-items:flex-end;">
+            <button id="runPipelineBtn" class="btn-primary">
+              <span>⚡</span>
+              <span>Run ConSQL Pipeline</span>
+            </button>
+            <button id="inspectDbBtn" class="btn-secondary" title="Inspect Database Schema">
+              <span>🔍 Schema</span>
+            </button>
+            <button id="clearBtn" class="btn-secondary" title="Clear Inputs">
+              <span>🗑️</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Example Query Pills -->
+        <div class="examples-bar">
+          <span class="examples-label">Quick Queries:</span>
+          <div id="examplesContainer" style="display:contents;"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- LatticeLoader Real-Time Execution Status Banner -->
+    <div id="latticeBanner" class="glass-panel" style="display:none; padding:18px 26px; margin-bottom:24px; align-items:center; justify-content:space-between; border-color:var(--border-glow-cyan); box-shadow:0 0 30px rgba(0,240,255,0.18);">
+      <div id="pipelineLatticeMount"></div>
+      <div id="pipelineLatticeSubtext" style="font-size:12px; color:var(--text-muted); font-family:var(--font-mono);">
+        ConSQL Multi-Objective Relational Optimization
+      </div>
+    </div>
+
+    <!-- Real-Time Pipeline Stepper -->
+    <div class="pipeline-stepper">
+      <div id="step-1" class="step-card">
+        <div class="step-number">1</div>
+        <div class="step-name">Schema Linking</div>
+        <div class="step-time"></div>
+      </div>
+      <div id="step-2" class="step-card">
+        <div class="step-number">2</div>
+        <div class="step-name">FK Graph Building</div>
+        <div class="step-time"></div>
+      </div>
+      <div id="step-3" class="step-card">
+        <div class="step-number">3</div>
+        <div class="step-name">Path Exploration</div>
+        <div class="step-time"></div>
+      </div>
+      <div id="step-4" class="step-card">
+        <div class="step-number">4</div>
+        <div class="step-name">Constraint Scoring</div>
+        <div class="step-time"></div>
+      </div>
+      <div id="step-5" class="step-card">
+        <div class="step-number">5</div>
+        <div class="step-name">Optimal Context</div>
+        <div class="step-time"></div>
+      </div>
+      <div id="step-6" class="step-card">
+        <div class="step-number">6</div>
+        <div class="step-name">SQL Synthesis</div>
+        <div class="step-time"></div>
+      </div>
+      <div id="step-7" class="step-card">
+        <div class="step-number">7</div>
+        <div class="step-name">Live SQLite Exec</div>
+        <div class="step-time"></div>
+      </div>
+    </div>
+
+    <!-- Main Studio Tabs -->
+    <section class="glass-panel" style="padding-top: 18px;">
+      <nav class="tabs-header">
+        <button class="tab-btn active" data-tab="sql">
+          <span>🎯</span> Generated SQL & Execution
+        </button>
+        <button class="tab-btn" data-tab="graph">
+          <span>🌐</span> Interactive Schema Graph
+        </button>
+        <button class="tab-btn" data-tab="linking">
+          <span>🔍</span> Semantic Schema Linking
+        </button>
+        <button class="tab-btn" data-tab="paths">
+          <span>🛤️</span> Join Path Exploration
+        </button>
+        <button class="tab-btn" data-tab="scoring">
+          <span>⚖️</span> Constraint Scoring
+        </button>
+        <button class="tab-btn" data-tab="prompt">
+          <span>📝</span> Serialized Prompt
+        </button>
+        <button class="tab-btn" data-tab="benchmarks">
+          <span>📊</span> Research Benchmarks
+        </button>
+        <button class="tab-btn" data-tab="lattice">
+          <span>💠</span> LatticeLoader Playground
+        </button>
+      </nav>
+
+      <!-- TAB 1: Generated SQL & Live SQLite Execution (Default) -->
+      <div id="tab-sql" class="tab-content active">
+        <!-- Execution Stats Row -->
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div id="statTotalTime" class="stat-value">0 ms</div>
+            <div class="stat-label">Pipeline Latency</div>
+          </div>
+          <div class="stat-card">
+            <div id="statExecTime" class="stat-value">0 ms</div>
+            <div class="stat-label">SQLite Query Time</div>
+          </div>
+          <div class="stat-card">
+            <div id="statRowsCount" class="stat-value">0</div>
+            <div class="stat-label">Rows Returned</div>
+          </div>
+          <div class="stat-card">
+            <div id="statTablesCount" class="stat-value">0</div>
+            <div class="stat-label">Tables in Join</div>
+          </div>
+        </div>
+
+        <!-- Editable Code Block Wrapper -->
+        <div class="code-block-wrapper">
+          <div class="code-header">
+            <div class="code-title">
+              <span>SQL Query (Editable)</span>
+              <span id="sqlValidationTag" class="score-badge score-high">Ready</span>
+            </div>
+            <div class="code-actions" style="align-items:center;">
+              <div id="sqlLatticeMount" style="margin-right:8px;"></div>
+              <button id="execModifiedBtn" class="btn-secondary" style="padding:4px 12px; font-size:12px;">
+                <span>▶ Run Modified SQL</span>
+              </button>
+              <button class="btn-secondary btn-copy" data-copy-target="predictedSqlArea" style="padding:4px 12px; font-size:12px;">
+                <span>📋 Copy SQL</span>
+              </button>
+            </div>
+          </div>
+          <textarea id="predictedSqlArea" class="sql-editable" placeholder="Generated SQL will appear here..."></textarea>
+          <div id="sqlNote" style="padding:8px 18px; font-size:12px; color:var(--accent-amber); background:rgba(245,158,11,0.08); display:none;"></div>
+        </div>
+
+        <!-- Live Database Execution Results Table -->
+        <div style="margin-top: 24px;">
+          <h3 style="font-size:16px; font-weight:700; color:#fff; display:flex; align-items:center; gap:8px;">
+            <span>📊 Live SQLite Execution Table</span>
+            <span style="font-size:12px; font-weight:normal; color:var(--text-muted);">(Real data queried directly from database file)</span>
+          </h3>
+
+          <div class="table-responsive">
+            <div id="emptyResultsMessage" style="text-align:center; padding:36px; color:var(--text-muted);">
+              Run a query above to see live database results.
+            </div>
+            <table id="executionResultsTable" class="data-table" style="display:none;">
+              <thead></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 2: Interactive Schema Graph -->
+      <div id="tab-graph" class="tab-content">
+        <div class="network-container">
+          <div class="network-controls">
+            <button id="graphFitBtn" class="btn-secondary" style="padding:4px 10px; font-size:11px;">
+              <span>Fit View</span>
+            </button>
+          </div>
+          <div class="network-legend">
+            <div class="legend-item">
+              <div class="legend-color" style="background:#ef4444;"></div>
+              <span>Optimal Join Strategy Path</span>
+            </div>
+            <div class="legend-item">
+              <div class="legend-color" style="background:#10b981;"></div>
+              <span>High Relevance Table (score ≥ 0.7)</span>
+            </div>
+            <div class="legend-item">
+              <div class="legend-color" style="background:#06b6d4;"></div>
+              <span>Medium Relevance Table (score ≥ 0.4)</span>
+            </div>
+            <div class="legend-item">
+              <div class="legend-color" style="background:#334155;"></div>
+              <span>Context Schema Node</span>
+            </div>
+          </div>
+          <div id="schemaGraphNetwork" style="width:100%; height:100%;"></div>
+        </div>
+      </div>
+
+      <!-- TAB 3: Semantic Schema Linking -->
+      <div id="tab-linking" class="tab-content">
+        <div style="margin-bottom:16px; display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <h3 style="font-size:16px; font-weight:700;">SBERT Schema Linking (all-MiniLM-L6-v2)</h3>
+            <p style="font-size:13px; color:var(--text-muted);">Semantic embedding similarity between query tokens and relational schema elements</p>
+          </div>
+          <div id="qceBadge" class="score-badge score-med" style="display:none;"></div>
+        </div>
+
+        <div class="split-layout">
+          <div>
+            <h4 style="font-size:14px; text-transform:uppercase; color:var(--accent-cyan); margin-bottom:12px;">Candidate Tables ($S_r$)</h4>
+            <div id="relevantTablesList" class="card-list"></div>
+          </div>
+          <div>
+            <h4 style="font-size:14px; text-transform:uppercase; color:var(--accent-emerald); margin-bottom:12px;">Candidate Columns</h4>
+            <div id="relevantColumnsList" class="card-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 4: Join Path Exploration -->
+      <div id="tab-paths" class="tab-content">
+        <div class="stat-grid" style="margin-bottom:20px;">
+          <div class="stat-card">
+            <div id="pathCountValid" class="stat-value" style="color:var(--accent-emerald);">0</div>
+            <div class="stat-label">Valid Join Paths</div>
+          </div>
+          <div class="stat-card">
+            <div id="pathCountInvalid" class="stat-value" style="color:var(--accent-rose);">0</div>
+            <div class="stat-label">Pruned Invalids</div>
+          </div>
+          <div class="stat-card">
+            <div id="pathCountTotal" class="stat-value">0</div>
+            <div class="stat-label">Total DFS Explored</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" style="color:var(--accent-cyan);">Max Depth 4</div>
+            <div class="stat-label">Hop Constraint</div>
+          </div>
+        </div>
+
+        <h4 style="font-size:14px; text-transform:uppercase; color:var(--text-secondary); margin-bottom:12px;">Discovered Valid Join Paths</h4>
+        <div id="validPathsList" class="card-list"></div>
+      </div>
+
+      <!-- TAB 5: Multi-Objective Constraint Scoring -->
+      <div id="tab-scoring" class="tab-content">
+        <div style="background:rgba(15,23,42,0.8); border:1px solid var(--border-subtle); border-radius:var(--radius-md); padding:16px; margin-bottom:20px;">
+          <h4 style="font-size:13px; text-transform:uppercase; color:var(--accent-cyan); margin-bottom:6px;">Multi-Objective Scoring Formula</h4>
+          <p style="font-family:var(--font-mono); font-size:14px; color:#fff;">
+            Score(p) = α · S_sem(p) + β · S_struct(p) - λ · L(p)
+          </p>
+          <p style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+            Optimized Hyperparameters: α = 0.4 (Semantic Weight), β = 0.4 (Structural Foreign Key Weight), λ = 0.2 (Join Hop Length Penalty)
+          </p>
+        </div>
+
+        <h4 style="font-size:14px; text-transform:uppercase; color:var(--text-secondary); margin-bottom:12px;">Ranked Candidate Join Strategies</h4>
+        <div id="scoredPathsList"></div>
+      </div>
+
+      <!-- TAB 6: Serialized Prompt -->
+      <div id="tab-prompt" class="tab-content">
+        <div class="code-block-wrapper">
+          <div class="code-header">
+            <div class="code-title">Serialized LLM Context Prompt</div>
+            <button class="btn-secondary btn-copy" data-copy-target="serializedPromptText" style="padding:4px 12px; font-size:12px;">
+              <span>📋 Copy Prompt</span>
+            </button>
+          </div>
+          <pre id="serializedPromptText" class="code-content"></pre>
+        </div>
+      </div>
+
+      <!-- TAB 7: Research Benchmarks -->
+      <div id="tab-benchmarks" class="tab-content">
+        <div style="margin-bottom:20px;">
+          <h3 style="font-size:18px; font-weight:700;">ConSQL Research Benchmark Evaluation</h3>
+          <p style="font-size:13px; color:var(--text-muted);">
+            Empirical comparison across 166 Spider databases and 11 BIRD Mini-Dev complex databases. ConSQL achieves +6.1% EX on Spider and +4.7% EX on BIRD over baseline models.
+          </p>
+        </div>
+
+        <div class="benchmark-grid">
+          <div class="chart-card">
+            <div class="chart-title">
+              <span>Spider Benchmark (Execution Accuracy & F1)</span>
+              <span class="db-tag">Spider Dev</span>
+            </div>
+            <canvas id="spiderChart"></canvas>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title">
+              <span>BIRD Mini-Dev Benchmark (Large Relational DBs)</span>
+              <span class="db-tag">BIRD Mini-Dev</span>
+            </div>
+            <canvas id="birdChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 8: LatticeLoader Component Playground -->
+      <div id="tab-lattice" class="tab-content">
+        <div style="margin-bottom:24px;">
+          <h3 style="font-size:18px; font-weight:700; color:#fff; display:flex; align-items:center; gap:10px;">
+            <span>💠 LatticeLoader Component from React Bits</span>
+            <span class="db-tag">React Bits</span>
+          </h3>
+          <p style="font-size:13px; color:var(--text-muted); margin-top:4px;">
+            Integrated React & Vanilla component featuring kinetic wave geometry, live stopwatch precision, and animated status dissolution (working ➔ done / error).
+          </p>
+        </div>
+
+        <div class="split-layout">
+          <!-- Live Interactive Preview Card -->
+          <div class="glass-panel" style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:280px; padding:36px; text-align:center; background:rgba(6,9,19,0.85); border-color:var(--border-glow-primary);">
+            <div style="font-size:11px; text-transform:uppercase; letter-spacing:1px; color:var(--text-muted); margin-bottom:24px;">Live Component Render</div>
+            <div id="playgroundLatticeMount" style="transform:scale(1.25); margin:20px 0;"></div>
+            <div id="playgroundStatusHint" style="font-size:12px; color:var(--accent-cyan); font-family:var(--font-mono); margin-top:20px;">status: "working"</div>
+          </div>
+
+          <!-- Playground Controls -->
+          <div class="glass-panel" style="padding:26px;">
+            <h4 style="font-size:13px; text-transform:uppercase; color:var(--accent-cyan); margin-bottom:16px;">Component Configuration</h4>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
+              <div class="select-group">
+                <label for="plgStatus">Status</label>
+                <select id="plgStatus" class="custom-select">
+                  <option value="working" selected>working (active wave)</option>
+                  <option value="done">done (check dissolution)</option>
+                  <option value="error">error (cross dissolution)</option>
+                </select>
+              </div>
+
+              <div class="select-group">
+                <label for="plgPattern">Wave Pattern</label>
+                <select id="plgPattern" class="custom-select">
+                  <option value="orbit" selected>orbit</option>
+                  <option value="spiral">spiral</option>
+                  <option value="snake">snake</option>
+                  <option value="ripple">ripple</option>
+                  <option value="dots">dots</option>
+                  <option value="arrow">arrow</option>
+                  <option value="sweep">sweep (4x4)</option>
+                  <option value="pulse">pulse (4x4)</option>
+                  <option value="spin">spin (4x4)</option>
+                  <option value="rain">rain (4x4)</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
+              <div class="select-group">
+                <label for="plgGrid">Grid Size</label>
+                <select id="plgGrid" class="custom-select">
+                  <option value="3" selected>3 x 3</option>
+                  <option value="4">4 x 4</option>
+                </select>
+              </div>
+
+              <div class="select-group">
+                <label for="plgShape">Shape</label>
+                <select id="plgShape" class="custom-select">
+                  <option value="round" selected>round (dots)</option>
+                  <option value="square">square (tiles)</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:18px;">
+              <div class="select-group">
+                <label for="plgLabel">Label (Working)</label>
+                <input type="text" id="plgLabel" value="Thinking" class="custom-select" style="background-image:none; padding-right:12px;">
+              </div>
+
+              <div class="select-group">
+                <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:22px;">
+                  <input type="checkbox" id="plgGlow" checked style="accent-color:var(--primary); width:16px; height:16px;">
+                  <span>Glow Halo</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Live Code Block -->
+            <div class="code-block-wrapper" style="margin-top:16px;">
+              <div class="code-header" style="padding:10px 16px;">
+                <span style="font-size:11px; font-family:var(--font-mono); color:var(--text-muted);">JSX Usage</span>
+                <button class="btn-secondary btn-copy" data-copy-target="plgCodeArea" style="padding:2px 8px; font-size:11px;">Copy</button>
+              </div>
+              <pre id="plgCodeArea" class="code-content" style="padding:14px; font-size:12px; max-height:140px;"></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer style="text-align:center; padding:30px 0 10px 0; color:var(--text-muted); font-size:12px;">
+      ConSQL Research Project — Graph-Guided Relational Context Optimization for Large Language Model Based Text-to-SQL Generation
+    </footer>
+  </div>
+
+  <!-- Database Schema Inspector Modal -->
+  <div id="schemaModal" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="schemaModalTitle" style="font-size:18px; font-weight:700; color:#fff;">Database Schema</h3>
+        <button class="close-btn modal-close-trigger">&times;</button>
+      </div>
+      <div id="schemaModalBody"></div>
+    </div>
+  </div>
+
+  <!-- LatticeLoader Universal Script -->
+  <script src="/static/components/LatticeLoader/LatticeLoader.js"></script>
+
+  <!-- Application Logic -->
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

@@ -55,8 +55,8 @@ class SQLValidator:
 
     Responsibilities
     ----------------
-    ✓ SQL syntax validation
-    ✓ Optional schema validation
+      SQL syntax validation
+      Optional schema validation
 
     Does NOT execute SQL.
     """

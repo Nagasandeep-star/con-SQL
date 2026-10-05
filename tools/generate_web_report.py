@@ -27,17 +27,25 @@ def render_complexity(metrics: dict) -> str:
 def main():
     root = Path(__file__).resolve().parent.parent
     results_dir = root / "outputs" / "results"
-    spider_path = results_dir / "eval_summary_spider.json"
-    bird_path = results_dir / "eval_summary.json"
+    spider_path = results_dir / "metrics_spider.json"
+    if not spider_path.exists():
+        spider_path = results_dir / "eval_summary_spider.json"
+
+    bird_path = results_dir / "metrics_bird.json"
+    if not bird_path.exists():
+        bird_path = results_dir / "eval_summary.json"
+
     out_path = results_dir / "metrics_report.html"
 
     if not spider_path.exists() or not bird_path.exists():
         raise FileNotFoundError("Required summary JSON files not found in outputs/results")
 
     with open(spider_path, "r", encoding="utf-8") as f:
-        spider_data = json.load(f)["metrics"]
+        spider_raw = json.load(f)
+        spider_data = spider_raw.get("metrics", spider_raw)
     with open(bird_path, "r", encoding="utf-8") as f:
-        bird_data = json.load(f)["metrics"]
+        bird_raw = json.load(f)
+        bird_data = bird_raw.get("metrics", bird_raw)
 
     html = [
         "<!DOCTYPE html>",

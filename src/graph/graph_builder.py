@@ -22,9 +22,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 
-# ─────────────────────────────────────────
+# -----------------------------------------
 # DATA CLASSES
-# ─────────────────────────────────────────
+# -----------------------------------------
 
 @dataclass
 class EdgeInfo:
@@ -39,7 +39,7 @@ class EdgeInfo:
 
     def __repr__(self):
         return (f"Edge({self.from_table_name}.{self.from_col_name} "
-                f"→ {self.to_table_name}.{self.to_col_name}, w={self.weight:.3f})")
+                f"-> {self.to_table_name}.{self.to_col_name}, w={self.weight:.3f})")
 
 
 @dataclass
@@ -52,7 +52,7 @@ class SchemaGraph:
     db_id: str
     graph: nx.Graph = field(default_factory=nx.Graph)
     edge_info: Dict[Tuple[int, int], List[EdgeInfo]] = field(default_factory=dict)
-    node_weights: Dict[int, float] = field(default_factory=dict)   # table_id → relevance score
+    node_weights: Dict[int, float] = field(default_factory=dict)   # table_id -> relevance score
     table_id_to_name: Dict[int, str] = field(default_factory=dict)
     table_name_to_id: Dict[str, int] = field(default_factory=dict)
 
@@ -82,9 +82,9 @@ class SchemaGraph:
                 f"Edges: {self.graph.number_of_edges()}")
 
 
-# ─────────────────────────────────────────
+# -----------------------------------------
 # GRAPH BUILDER
-# ─────────────────────────────────────────
+# -----------------------------------------
 
 class SchemaGraphBuilder:
     """
@@ -108,7 +108,7 @@ class SchemaGraphBuilder:
         # Cache table-pair similarities to avoid recomputation
         self._sim_cache: Dict[str, float] = {}
 
-    # ── Main Build ───────────────────────────────────────────
+    # -- Main Build -------------------------------------------
 
     def build(
         self,
@@ -156,7 +156,7 @@ class SchemaGraphBuilder:
             selected_ids = set(linking_result.get_table_ids())
             logger.info(f"SBERT candidate tables (S_r): {[t.table.name_original for t in linking_result.relevant_tables]}")
         else:
-            # no linking information → include all tables
+            # no linking information -> include all tables
             selected_ids = set(t.table_id for t in schema.tables)
 
         for table in schema.tables:
@@ -287,7 +287,7 @@ class SchemaGraphBuilder:
         self._sim_cache[cache_key] = sim
         return sim
 
-    # ── Batch Build ──────────────────────────────────────────
+    # -- Batch Build ------------------------------------------
 
     def build_all(
         self,
@@ -297,10 +297,10 @@ class SchemaGraphBuilder:
         graphs = {}
         for db_id, schema in schemas.items():
             graphs[db_id] = self.build(schema)
-        logger.info(f"✅ Built {len(graphs)} schema graphs.")
+        logger.info(f"[OK] Built {len(graphs)} schema graphs.")
         return graphs
 
-    # ── Visualization / Debug ─────────────────────────────────
+    # -- Visualization / Debug ---------------------------------
 
     def print_graph(self, sg: SchemaGraph, schema: Schema):
         """Pretty print the schema graph."""
@@ -320,9 +320,9 @@ class SchemaGraphBuilder:
             t1_name = sg.table_id_to_name.get(t1_id, str(t1_id))
             t2_name = sg.table_id_to_name.get(t2_id, str(t2_id))
             w = data.get("weight", 0.0)
-            print(f"  {t1_name:<20} ↔  {t2_name:<20} weight={w:.3f}")
+            print(f"  {t1_name:<20}    {t2_name:<20} weight={w:.3f}")
             for info in infos:
-                print(f"    FK: {info.from_col_name} → {info.to_col_name}")
+                print(f"    FK: {info.from_col_name} -> {info.to_col_name}")
 
         print(f"\nConnected Components: {nx.number_connected_components(sg.graph)}")
         print(f"{'='*60}")

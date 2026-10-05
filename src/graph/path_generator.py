@@ -29,9 +29,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 
-# ─────────────────────────────────────────
+# -----------------------------------------
 # DATA CLASSES
-# ─────────────────────────────────────────
+# -----------------------------------------
 
 @dataclass
 class JoinPath:
@@ -66,7 +66,7 @@ class JoinPath:
         return sum(self.edge_weights) / len(self.edge_weights)
 
     def __repr__(self):
-        path_str = " → ".join(self.path_table_names)
+        path_str = " -> ".join(self.path_table_names)
         return f"JoinPath([{path_str}], valid={self.is_valid})"
 
     def __hash__(self):
@@ -103,9 +103,9 @@ class PathGenerationResult:
                 f"Invalid: {self.num_invalid}")
 
 
-# ─────────────────────────────────────────
+# -----------------------------------------
 # PATH GENERATOR
-# ─────────────────────────────────────────
+# -----------------------------------------
 
 class PathGenerator:
     """
@@ -118,12 +118,12 @@ class PathGenerator:
     - Apply structural validity filters to remove invalid paths
 
     Structural Constraints Enforced:
-    ✅ C1: All consecutive table pairs must have a valid FK edge
-    ✅ C2: No cycles — each table appears at most once in a path
-    ✅ C3: Path length must be within [1, max_depth]
-    ✅ C4: Path must contain at least one relevant table (from linking)
-    ✅ C5: All relevant tables must be reachable/included (coverage check)
-    ✅ C6: No redundant paths (duplicate table sequences)
+    [OK] C1: All consecutive table pairs must have a valid FK edge
+    [OK] C2: No cycles -- each table appears at most once in a path
+    [OK] C3: Path length must be within [1, max_depth]
+    [OK] C4: Path must contain at least one relevant table (from linking)
+    [OK] C5: All relevant tables must be reachable/included (coverage check)
+    [OK] C6: No redundant paths (duplicate table sequences)
     """
 
     def __init__(
@@ -143,7 +143,7 @@ class PathGenerator:
         self.max_paths           = max_paths
         self.require_all_relevant = require_all_relevant
 
-    # ── Main Entry Point ─────────────────────────────────────
+    # -- Main Entry Point -------------------------------------
 
     def generate(
         self,
@@ -167,27 +167,27 @@ class PathGenerator:
         relevant_ids   = set(linking_result.get_table_ids())
         graph          = schema_graph.graph
 
-        # ── Step 1: Generate all candidate paths via DFS ──────
+        # -- Step 1: Generate all candidate paths via DFS ------
         raw_paths = self._generate_raw_paths(
             graph, schema_graph, relevant_ids
         )
 
-        # ── Step 2: Apply structural validity filters ─────────
+        # -- Step 2: Apply structural validity filters ---------
         valid_paths, invalid_paths = self._filter_paths(
             raw_paths, graph, schema_graph, relevant_ids
         )
 
-        # ── Step 3: Fallback if no valid paths ────────────────
+        # -- Step 3: Fallback if no valid paths ----------------
         if not valid_paths:
             valid_paths = self._fallback(
                 graph, schema_graph, relevant_ids
             )
             logger.warning(
-                f"⚠️  No valid paths found for '{query[:50]}'. "
+                f"[WARN]  No valid paths found for '{query[:50]}'. "
                 f"Fallback produced {len(valid_paths)} path(s)."
             )
 
-        # ── Step 4: Cap at max_paths ──────────────────────────
+        # -- Step 4: Cap at max_paths --------------------------
         valid_paths = valid_paths[:self.max_paths]
 
         all_paths = valid_paths + invalid_paths
@@ -199,7 +199,7 @@ class PathGenerator:
             invalid_paths=invalid_paths
         )
 
-    # ── Raw Path Generation (DFS) ────────────────────────────
+    # -- Raw Path Generation (DFS) ----------------------------
 
     def _generate_raw_paths(
         self,
@@ -273,7 +273,7 @@ class PathGenerator:
 
         return results
 
-    # ── Structural Validity Filters ──────────────────────────
+    # -- Structural Validity Filters --------------------------
 
     def _filter_paths(
         self,
@@ -342,7 +342,7 @@ class PathGenerator:
         if relevant_ids and not path_set.intersection(relevant_ids):
             return False, "C4: No relevant table in path"
 
-        # C5: Optional — must contain ALL relevant tables
+        # C5: Optional -- must contain ALL relevant tables
         if self.require_all_relevant and relevant_ids:
             missing = relevant_ids - path_set
             if missing:
@@ -351,7 +351,7 @@ class PathGenerator:
 
         return True, ""
 
-    # ── Fallback ─────────────────────────────────────────────
+    # -- Fallback ---------------------------------------------
 
     def _fallback(
         self,
@@ -400,7 +400,7 @@ class PathGenerator:
 
         return fallback_paths[:self.max_paths]
 
-    # ── Utilities ─────────────────────────────────────────────
+    # -- Utilities ---------------------------------------------
 
     def print_result(
         self,
@@ -414,20 +414,20 @@ class PathGenerator:
         print(f"Query: {result.query[:70]}")
         print(f"{'-'*65}")
         print(f"Total Generated : {len(result.all_paths)}")
-        print(f"✅ Valid Paths  : {result.num_valid}")
-        print(f"❌ Invalid Paths: {result.num_invalid}")
+        print(f"[OK] Valid Paths  : {result.num_valid}")
+        print(f"[FAIL] Invalid Paths: {result.num_invalid}")
 
-        print(f"\n✅ Valid Paths (top {min(top_n, result.num_valid)}):")
+        print(f"\n[OK] Valid Paths (top {min(top_n, result.num_valid)}):")
         for i, path in enumerate(result.valid_paths[:top_n]):
-            path_str = " → ".join(path.path_table_names)
+            path_str = " -> ".join(path.path_table_names)
             w_str    = f"avg_w={path.avg_edge_weight:.3f}" if path.edge_weights else "single-table"
             print(f"  [{i+1}] {path_str}  ({w_str})")
 
         if show_invalid and result.invalid_paths:
-            print(f"\n❌ Invalid Paths (sample):")
+            print(f"\n[FAIL] Invalid Paths (sample):")
             for path in result.invalid_paths[:5]:
-                path_str = " → ".join(path.path_table_names)
-                print(f"  ✗ {path_str}  | Reason: {path.rejection_reason}")
+                path_str = " -> ".join(path.path_table_names)
+                print(f"    {path_str}  | Reason: {path.rejection_reason}")
 
         print(f"{'='*65}")
 

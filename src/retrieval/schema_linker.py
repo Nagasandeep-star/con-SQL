@@ -1,7 +1,7 @@
 # src/schema_linker.py
 # ============================================================
 # ConSQL - Phase 2: SBERT Schema Linker
-# Maps natural language query → relevant tables + columns
+# Maps natural language query -> relevant tables + columns
 # using semantic similarity via Sentence-BERT
 # ============================================================
 
@@ -23,9 +23,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 
-# ─────────────────────────────────────────
+# -----------------------------------------
 # DATA CLASSES
-# ─────────────────────────────────────────
+# -----------------------------------------
 
 @dataclass
 class TableScore:
@@ -71,12 +71,12 @@ class SchemaLinkingResult:
     def summary(self) -> str:
         tables = ", ".join(self.get_table_names()) or "None"
         cols = len(self.relevant_columns)
-        return f"Query: '{self.query[:60]}...'\n  → Tables: [{tables}]\n  → Relevant Columns: {cols}"
+        return f"Query: '{self.query[:60]}...'\n  -> Tables: [{tables}]\n  -> Relevant Columns: {cols}"
 
 
-# ─────────────────────────────────────────
+# -----------------------------------------
 # SCHEMA LINKER
-# ─────────────────────────────────────────
+# -----------------------------------------
 
 class SBERTSchemaLinker:
     """
@@ -84,11 +84,11 @@ class SBERTSchemaLinker:
     to relevant tables and columns in a database schema.
 
     Pipeline:
-      1. Encode query → dense vector
-      2. Encode each table name + column name → dense vectors
+      1. Encode query -> dense vector
+      2. Encode each table name + column name -> dense vectors
       3. Compute cosine similarity between query and each schema element
-      4. Score = α * table_sim + β * column_sim
-      5. Filter elements above threshold τ
+      4. Score =   * table_sim +   * column_sim
+      5. Filter elements above threshold  
     """
 
     def __init__(
@@ -102,7 +102,7 @@ class SBERTSchemaLinker:
         """
         Args:
             model_name: HuggingFace SBERT model to use
-            similarity_threshold: τ — minimum score to include a schema element
+            similarity_threshold:   -- minimum score to include a schema element
             alpha: weight for table-level similarity
             beta: weight for column-level similarity
             device: 'cpu' or 'cuda'
@@ -115,12 +115,12 @@ class SBERTSchemaLinker:
 
         logger.info(f"Loading SBERT model: {model_name} ...")
         self.model = SentenceTransformer(model_name, device=device)
-        logger.info("✅ SBERT model loaded.")
+        logger.info("[OK] SBERT model loaded.")
 
-        # Cache for schema embeddings — avoid re-encoding same schema
+        # Cache for schema embeddings -- avoid re-encoding same schema
         self._schema_cache: Dict[str, Dict] = {}
 
-    # ── Encoding ─────────────────────────────────────────────
+    # -- Encoding ---------------------------------------------
 
     def _encode(self, texts: List[str]) -> np.ndarray:
         """Encode a list of texts into dense vectors."""
@@ -130,7 +130,7 @@ class SBERTSchemaLinker:
             texts,
             convert_to_numpy=True,
             show_progress_bar=False,
-            normalize_embeddings=True   # L2 norm → cosine = dot product
+            normalize_embeddings=True   # L2 norm -> cosine = dot product
         )
         return embeddings
 
@@ -192,7 +192,7 @@ class SBERTSchemaLinker:
         self._schema_cache[schema.db_id] = result
         return result
 
-    # ── Similarity ───────────────────────────────────────────
+    # -- Similarity -------------------------------------------
 
     def _cosine_sim(self, query_vec: np.ndarray, matrix: np.ndarray) -> np.ndarray:
         """
@@ -204,15 +204,16 @@ class SBERTSchemaLinker:
             matrix = matrix.reshape(1, -1)
         return cosine_similarity(query_vec.reshape(1, -1), matrix)[0]
 
-    # ── Main Linking ─────────────────────────────────────────
+    # -- Main Linking -----------------------------------------
 
-    def link(self, query: str, schema: Schema) -> SchemaLinkingResult:
+    def link(self, query: str, schema: Schema, top_k: Optional[int] = None) -> SchemaLinkingResult:
         """
         Main entry point. Link a query to relevant schema elements.
 
         Args:
             query: natural language question
             schema: Schema object for the target database
+            top_k: Optional retrieval budget (e.g., from QCE)
 
         Returns:
             SchemaLinkingResult with relevant tables and columns
@@ -233,17 +234,23 @@ class SBERTSchemaLinker:
             query_vec, schema, schema_data, table_scores
         )
 
-        # Step 5: Filter by threshold
-        relevant_tables = [ts for ts in table_scores if ts.score >= self.threshold]
+        sorted_tables = sorted(table_scores, key=lambda x: x.score, reverse=True)
+
+        # Step 5: Filter by top_k budget or threshold
+        if top_k is not None and top_k > 0:
+            relevant_tables = sorted_tables[:min(top_k, len(sorted_tables))]
+        else:
+            relevant_tables = [ts for ts in sorted_tables if ts.score >= self.threshold]
+
         relevant_columns = [cs for cs in column_scores if cs.score >= self.threshold]
 
-        # Step 6: Fallback — if nothing passes threshold, take top-2 tables
+        # Step 6: Fallback -- if nothing passes threshold, take top-2 tables
         if not relevant_tables:
             logger.warning(
-                f"⚠️  No tables above threshold {self.threshold} for query: '{query[:50]}'. "
+                f"No tables above threshold {self.threshold} for query: '{query[:50]}'. "
                 f"Using top-2 fallback."
             )
-            relevant_tables = sorted(table_scores, key=lambda x: x.score, reverse=True)[:2]
+            relevant_tables = sorted_tables[:min(2, len(sorted_tables))]
 
         # Sort by score descending
         relevant_tables  = sorted(relevant_tables,  key=lambda x: x.score, reverse=True)
@@ -295,7 +302,7 @@ class SBERTSchemaLinker:
         if len(schema_data["column_embeddings"]) == 0:
             return []
 
-        # Build table_id → table_score lookup
+        # Build table_id -> table_score lookup
         table_score_map = {ts.table.table_id: ts.score for ts in table_scores}
 
         col_sims = self._cosine_sim(query_vec, schema_data["column_embeddings"])
@@ -320,7 +327,7 @@ class SBERTSchemaLinker:
 
         return column_scores
 
-    # ── Batch Processing ─────────────────────────────────────
+    # -- Batch Processing -------------------------------------
 
     def link_batch(
         self,
@@ -344,7 +351,7 @@ class SBERTSchemaLinker:
                 logger.info(f"  Linked {i+1}/{len(samples)} samples...")
         return results
 
-    # ── Evaluation Helper ────────────────────────────────────
+    # -- Evaluation Helper ------------------------------------
 
     def evaluate_linking_accuracy(
         self,
@@ -356,7 +363,7 @@ class SBERTSchemaLinker:
         Evaluate how well schema linking recalls the gold tables.
         A table is 'gold' if it appears in the ground-truth SQL.
 
-        Returns recall@k — what % of gold tables were correctly retrieved.
+        Returns recall@k -- what % of gold tables were correctly retrieved.
         """
         from src.data_loader import SpiderSample
         import re
@@ -401,17 +408,17 @@ class SBERTSchemaLinker:
         print("\n" + "="*65)
         print(f"Query: {result.query}")
         print("-"*65)
-        print(f"✅ Relevant Tables ({len(result.relevant_tables)}):")
+        print(f"[OK] Relevant Tables ({len(result.relevant_tables)}):")
         for ts in result.relevant_tables:
             print(f"   [{ts.score:.3f}] {ts.table.name_original}")
 
-        print(f"\n✅ Relevant Columns ({len(result.relevant_columns)}):")
+        print(f"\n[OK] Relevant Columns ({len(result.relevant_columns)}):")
         for cs in result.relevant_columns[:10]:  # top 10
             print(f"   [{cs.score:.3f}] {cs.table.name_original}.{cs.column.name_original}")
 
         if show_all:
-            print(f"\n📊 All Table Scores:")
+            print(f"\n  All Table Scores:")
             for ts in result.all_table_scores:
-                marker = "✅" if ts.score >= self.threshold else "❌"
+                marker = "[OK]" if ts.score >= self.threshold else "[FAIL]"
                 print(f"   {marker} [{ts.score:.3f}] {ts.table.name_original}")
         print("="*65)

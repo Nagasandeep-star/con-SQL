@@ -5,13 +5,13 @@
 # This is the CORE NOVEL CONTRIBUTION of the research.
 # 
 # Scoring Formula (from the paper):
-#   Score(p) = α · S_sem(p) + β · S_struct(p) − λ · L(p)
+#   Score(p) =     S_sem(p) +     S_struct(p)       L(p)
 #
 # Where:
 #   S_sem(p)    = Semantic Relevance Score  (avg node weight along path)
 #   S_struct(p) = Structural Validity Score (valid FK edges / total edges)
 #   L(p)        = Length Penalty            (normalized path length)
-#   α, β, λ     = Hyperparameters from config.py
+#    ,  ,       = Hyperparameters from config.py
 #
 # Final score is normalized to [0, 1].
 # ============================================================
@@ -33,9 +33,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 
-# ─────────────────────────────────────────
+# -----------------------------------------
 # DATA CLASSES
-# ─────────────────────────────────────────
+# -----------------------------------------
 
 @dataclass
 class ScoredPath:
@@ -50,7 +50,7 @@ class ScoredPath:
     score_breakdown: Dict = field(default_factory=dict)
 
     def __repr__(self):
-        path_str = " → ".join(self.path.path_table_names)
+        path_str = " -> ".join(self.path.path_table_names)
         return (f"ScoredPath([{path_str}] | "
                 f"sem={self.sem_score:.3f}, "
                 f"struct={self.struct_score:.3f}, "
@@ -68,10 +68,11 @@ class PathSelectionResult:
     alpha:        float
     beta:         float
     lam:          float
+    top_k_paths:  List[ScoredPath] = field(default_factory=list)
 
     def summary(self) -> str:
         bp = self.best_path
-        path_str = " → ".join(bp.path.path_table_names)
+        path_str = " -> ".join(bp.path.path_table_names)
         return (f"Best Path: [{path_str}] | "
                 f"Score={bp.final_score:.3f} "
                 f"(sem={bp.sem_score:.3f}, "
@@ -79,9 +80,9 @@ class PathSelectionResult:
                 f"penalty={bp.length_penalty:.3f})")
 
 
-# ─────────────────────────────────────────
+# -----------------------------------------
 # PATH SCORER
-# ─────────────────────────────────────────
+# -----------------------------------------
 
 class PathScorer:
     """
@@ -89,26 +90,26 @@ class PathScorer:
     constraint-guided scoring formula.
 
     Formula:
-        Score(p) = α · S_sem(p) + β · S_struct(p) − λ · L(p)
+        Score(p) =     S_sem(p) +     S_struct(p)       L(p)
 
     Components:
-    ─────────────────────────────────────────────────────────
+    ---------------------------------------------------------
     S_sem(p):
         Average semantic relevance of tables in the path.
         Uses node weights from SBERT schema linking.
         Rewards paths that pass through query-relevant tables.
 
-        S_sem(p) = (1/|p|) · Σ node_weight(ti)
+        S_sem(p) = (1/|p|)     node_weight(ti)
 
     S_struct(p):
         Structural validity score based on FK edge quality.
         Rewards paths with strong FK relationships.
         Combines: FK edge existence + edge semantic weight
 
-        S_struct(p) = (valid_FK_edges / total_edges) · avg_edge_weight
-                    = 1.0 · avg_edge_weight  (since all paths have valid FKs)
+        S_struct(p) = (valid_FK_edges / total_edges)   avg_edge_weight
+                    = 1.0   avg_edge_weight  (since all paths have valid FKs)
 
-    L(p) — Length Penalty:
+    L(p) -- Length Penalty:
         Penalizes longer paths to prefer simpler joins.
         Normalized to [0, 1]:
 
@@ -117,7 +118,7 @@ class PathScorer:
         where |p| = number of tables, max_depth from config.
 
     Final Score is clamped to [0, 1].
-    ─────────────────────────────────────────────────────────
+    ---------------------------------------------------------
     """
 
     def __init__(
@@ -143,24 +144,26 @@ class PathScorer:
         assert abs(alpha + beta + lam - 1.0) < 0.01, \
             f"Weights must sum to 1.0: alpha={alpha} + beta={beta} + lam={lam} = {alpha+beta+lam}"
 
-    # ── Main Scoring Entry Point ──────────────────────────────
+    # -- Main Scoring Entry Point ------------------------------
 
     def score_and_select(
         self,
         path_result:    PathGenerationResult,
         schema_graph:   SchemaGraph,
-        linking_result: SchemaLinkingResult
+        linking_result: SchemaLinkingResult,
+        top_k:          int = 1
     ) -> PathSelectionResult:
         """
-        Score all valid paths and return the best one.
+        Score all valid paths and return the best one(s).
 
         Args:
             path_result:    output from Phase 4 PathGenerator
             schema_graph:   weighted schema graph from Phase 3
             linking_result: SBERT linking output from Phase 2
+            top_k:          number of candidate paths to include in top_k_paths
 
         Returns:
-            PathSelectionResult with best path and all ranked paths
+            PathSelectionResult with best path, top-k paths, and all ranked paths
         """
         if not path_result.valid_paths:
             raise ValueError(f"No valid paths to score for query: {path_result.query}")
@@ -175,6 +178,7 @@ class PathScorer:
         scored_paths.sort(key=lambda x: x.final_score, reverse=True)
 
         best_path = scored_paths[0]
+        selected_top_k = scored_paths[:max(1, min(top_k, len(scored_paths)))]
 
         return PathSelectionResult(
             query=path_result.query,
@@ -183,10 +187,11 @@ class PathScorer:
             scored_paths=scored_paths,
             alpha=self.alpha,
             beta=self.beta,
-            lam=self.lam
+            lam=self.lam,
+            top_k_paths=selected_top_k
         )
 
-    # ── Score a Single Path ───────────────────────────────────
+    # -- Score a Single Path -----------------------------------
 
     def _score_path(
         self,
@@ -198,16 +203,16 @@ class PathScorer:
         Compute all score components for a single path.
         Returns a ScoredPath with full breakdown.
         """
-        # ── S_sem: Semantic Relevance Score ───────────────────
+        # -- S_sem: Semantic Relevance Score -------------------
         sem_score = self._compute_semantic_score(path, schema_graph, linking_result)
 
-        # ── S_struct: Structural Validity Score ───────────────
+        # -- S_struct: Structural Validity Score ---------------
         struct_score = self._compute_structural_score(path, schema_graph)
 
-        # ── L(p): Length Penalty ──────────────────────────────
+        # -- L(p): Length Penalty ------------------------------
         length_penalty = self._compute_length_penalty(path)
 
-        # ── Final Score ───────────────────────────────────────
+        # -- Final Score ---------------------------------------
         raw_score  = (self.alpha * sem_score
                     + self.beta  * struct_score
                     - self.lam   * length_penalty)
@@ -216,9 +221,9 @@ class PathScorer:
         final_score = max(0.0, min(1.0, raw_score))
 
         breakdown = {
-            "α · S_sem":      round(self.alpha * sem_score, 4),
-            "β · S_struct":   round(self.beta  * struct_score, 4),
-            "λ · L(p)":       round(self.lam   * length_penalty, 4),
+            "    S_sem":      round(self.alpha * sem_score, 4),
+            "    S_struct":   round(self.beta  * struct_score, 4),
+            "    L(p)":       round(self.lam   * length_penalty, 4),
             "raw_score":      round(raw_score, 4),
             "final_score":    round(final_score, 4),
         }
@@ -232,7 +237,7 @@ class PathScorer:
             score_breakdown=breakdown
         )
 
-    # ── Score Components ─────────────────────────────────────
+    # -- Score Components -------------------------------------
 
     def _compute_semantic_score(
         self,
@@ -278,7 +283,7 @@ class PathScorer:
         S_struct(p) = structural quality of FK edges along the path.
 
         For a path with k edges:
-            S_struct = (valid_FK_count / k) · avg_edge_weight
+            S_struct = (valid_FK_count / k)   avg_edge_weight
 
         Since Phase 4 already ensures all edges are valid FKs,
         valid_FK_count / k = 1.0 always.
@@ -328,7 +333,7 @@ class PathScorer:
         num_joins = max(0, path.length - 1)
         return num_joins / (self.max_depth - 1)
 
-    # ── Hyperparameter Sensitivity Analysis ──────────────────
+    # -- Hyperparameter Sensitivity Analysis ------------------
 
     def sensitivity_analysis(
         self,
@@ -337,7 +342,7 @@ class PathScorer:
         linking_result: SchemaLinkingResult
     ) -> List[Dict]:
         """
-        Test different α, β, λ combinations and show how
+        Test different  ,  ,   combinations and show how
         the best path changes. Useful for tuning hyperparameters.
         """
         configs = [
@@ -365,7 +370,7 @@ class PathScorer:
                 "alpha":        alpha,
                 "beta":         beta,
                 "lambda":       lam,
-                "best_path":    " → ".join(bp.path.path_table_names),
+                "best_path":    " -> ".join(bp.path.path_table_names),
                 "final_score":  bp.final_score,
                 "sem_score":    bp.sem_score,
                 "struct_score": bp.struct_score,
@@ -373,7 +378,7 @@ class PathScorer:
 
         return results
 
-    # ── Batch Evaluation ─────────────────────────────────────
+    # -- Batch Evaluation -------------------------------------
 
     def evaluate(
         self,
@@ -436,30 +441,30 @@ class PathScorer:
             }
         }
 
-    # ── Pretty Print ─────────────────────────────────────────
+    # -- Pretty Print -----------------------------------------
 
     def print_result(self, result: PathSelectionResult, top_n: int = 5):
         """Pretty print scoring results."""
         print(f"\n{'='*65}")
         print(f"Path Scoring: {result.db_id}")
         print(f"Query: {result.query[:70]}")
-        print(f"Weights: α={result.alpha}, β={result.beta}, λ={result.lam}")
+        print(f"Weights:  ={result.alpha},  ={result.beta},  ={result.lam}")
         print(f"{'-'*65}")
 
-        print(f"\n🏆 BEST PATH:")
+        print(f"\n  BEST PATH:")
         bp       = result.best_path
-        path_str = " → ".join(bp.path.path_table_names)
+        path_str = " -> ".join(bp.path.path_table_names)
         print(f"   {path_str}")
         print(f"   Score Breakdown:")
         for k, v in bp.score_breakdown.items():
             print(f"     {k:<20} = {v}")
 
-        print(f"\n📊 All Scored Paths (top {min(top_n, len(result.scored_paths))}):")
+        print(f"\n  All Scored Paths (top {min(top_n, len(result.scored_paths))}):")
         print(f"   {'#':<4} {'Score':>6}  {'Sem':>6}  {'Struct':>6}  {'Pen':>6}  Path")
         print(f"   {'-'*60}")
         for i, sp in enumerate(result.scored_paths[:top_n]):
-            path_str = " → ".join(sp.path.path_table_names)
-            marker   = "🏆" if i == 0 else f"  "
+            path_str = " -> ".join(sp.path.path_table_names)
+            marker   = " " if i == 0 else f"  "
             print(f"  {marker}[{i+1}] {sp.final_score:>6.3f}  "
                   f"{sp.sem_score:>6.3f}  "
                   f"{sp.struct_score:>6.3f}  "

@@ -15,3 +15,8 @@ class ComplexityResult:
     complexity_score: float
     complexity_level: ComplexityLevel
     retrieval_budget: RetrievalBudget
+
+    @property
+    def score(self) -> float:
+        return self.complexity_score
+

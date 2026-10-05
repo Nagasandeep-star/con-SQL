@@ -14,9 +14,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 
-# ─────────────────────────────────────────
+# -----------------------------------------
 # DATA CLASSES
-# ─────────────────────────────────────────
+# -----------------------------------------
 
 @dataclass
 class Column:
@@ -98,9 +98,9 @@ class SpiderSample:
     sql: Dict               # structured SQL parse
 
 
-# ─────────────────────────────────────────
+# -----------------------------------------
 # SPIDER DATA LOADER
-# ─────────────────────────────────────────
+# -----------------------------------------
 
 class SpiderDataLoader:
     """
@@ -132,14 +132,14 @@ class SpiderDataLoader:
                     f"\nMake sure your Spider dataset is placed in: {self.spider_dir}"
                     f"\nExpected structure:"
                     f"\n  data/spider/"
-                    f"\n  ├── train_spider.json"
-                    f"\n  ├── dev.json"
-                    f"\n  ├── tables.json"
-                    f"\n  └── database/"
+                    f"\n  |-- train_spider.json"
+                    f"\n  |-- dev.json"
+                    f"\n  |-- tables.json"
+                    f"\n  `-- database/"
                 )
-        logger.info("✅ All Spider files found.")
+        logger.info("[OK] All Spider files found.")
 
-    # ── Schema Loading ──────────────────────────────────────
+    # -- Schema Loading --------------------------------------
 
     def load_schemas(self) -> Dict[str, Schema]:
         """
@@ -169,14 +169,14 @@ class SpiderDataLoader:
             schema = self._parse_schema(raw)
             self.schemas[schema.db_id] = schema
 
-        logger.info(f"✅ Loaded {len(self.schemas)} database schemas.")
+        logger.info(f"[OK] Loaded {len(self.schemas)} database schemas.")
         return self.schemas
 
     def _parse_schema(self, raw: Dict) -> Schema:
         """Convert raw Spider schema dict into Schema dataclass."""
         db_id = raw["db_id"]
 
-        # ── Build Tables ──
+        # -- Build Tables --
         tables = []
         for idx, (name, name_orig) in enumerate(
             zip(raw["table_names"], raw["table_names_original"])
@@ -189,8 +189,8 @@ class SpiderDataLoader:
                 primary_keys=[]
             ))
 
-        # ── Build Columns ──
-        # column_names[0] is always ("*", -1) — the wildcard, skip it
+        # -- Build Columns --
+        # column_names[0] is always ("*", -1) -- the wildcard, skip it
         all_columns = []
         for col_id, ((table_id, col_name), (_, col_name_orig), col_type) in enumerate(
             zip(
@@ -213,13 +213,13 @@ class SpiderDataLoader:
             if table_id >= 0 and table_id < len(tables):
                 tables[table_id].columns.append(col)
 
-        # ── Primary Keys ──
+        # -- Primary Keys --
         for pk_col_id in raw.get("primary_keys", []):
             col = all_columns[pk_col_id]
             if col.table_id >= 0:
                 tables[col.table_id].primary_keys.append(pk_col_id)
 
-        # ── Foreign Keys ──
+        # -- Foreign Keys --
         foreign_keys = []
         for from_col_id, to_col_id in raw.get("foreign_keys", []):
             from_col = all_columns[from_col_id]
@@ -239,7 +239,7 @@ class SpiderDataLoader:
             columns=all_columns
         )
 
-    # ── Sample Loading ───────────────────────────────────────
+    # -- Sample Loading ---------------------------------------
 
     def load_train(self) -> List[SpiderSample]:
         path = os.path.join(self.spider_dir, "train_spider.json")
@@ -278,11 +278,11 @@ class SpiderDataLoader:
             samples.append(sample)
 
         if skipped:
-            logger.warning(f"⚠️  Skipped {skipped} samples (schema not found).")
-        logger.info(f"✅ Loaded {len(samples)} {split} samples.")
+            logger.warning(f"[WARN]  Skipped {skipped} samples (schema not found).")
+        logger.info(f"[OK] Loaded {len(samples)} {split} samples.")
         return samples
 
-    # ── Utilities ────────────────────────────────────────────
+    # -- Utilities --------------------------------------------
 
     def get_schema(self, db_id: str) -> Optional[Schema]:
         return self.schemas.get(db_id)
@@ -320,7 +320,7 @@ class SpiderDataLoader:
                 print(f"\nSchema   : {schema.summary()}")
                 for t in schema.tables:
                     cols = ", ".join(c.name for c in t.columns[:5])
-                    print(f"  Table  : {t.name_original} → [{cols}{'...' if len(t.columns)>5 else ''}]")
+                    print(f"  Table  : {t.name_original} -> [{cols}{'...' if len(t.columns)>5 else ''}]")
                 if schema.foreign_keys:
                     print(f"\nForeign Keys:")
                     for fk in schema.foreign_keys:
@@ -329,5 +329,5 @@ class SpiderDataLoader:
                         ft = schema.get_table_by_id(fk.from_table_id)
                         tt = schema.get_table_by_id(fk.to_table_id)
                         if fc and tc and ft and tt:
-                            print(f"  {ft.name}.{fc.name} → {tt.name}.{tc.name}")
+                            print(f"  {ft.name}.{fc.name} -> {tt.name}.{tc.name}")
         print("="*60)

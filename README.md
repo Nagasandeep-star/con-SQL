@@ -1,295 +1,148 @@
-# ConSQL: Graph-Guided Context Optimization for Text-to-SQL using Local LLMs
+# ConSQL: Equivalence-Aware Relational Context Optimization and Multi-Candidate Graph Guidance for Text-to-SQL Generation
 
-ConSQL is a Text-to-SQL framework that converts natural language questions into executable SQL queries using **graph-guided schema optimization** and **local Large Language Models (LLMs)** powered by **Ollama**.
+ConSQL is a high-performance Text-to-SQL framework that inserts an explicit, learning-based relational optimization stage between schema retrieval and Large Language Model (LLM) generation.
 
-Instead of providing the entire database schema to the language model, ConSQL constructs a relational graph from primary key and foreign key relationships, identifies only the relevant schema components for a given query, and generates optimized SQL statements. This approach reduces prompt size, improves relational reasoning, and enables fully local execution without requiring cloud-based APIs.
-
----
-
-## Features
-
-- Graph-guided schema representation
-- Query-aware schema pruning
-- Dynamic prompt generation
-- Local inference using Ollama
-- No API keys required
-- SQLite database support
-- Spider benchmark compatible
-- Modular and extensible architecture
+Instead of presenting the entire database catalog or relying on unguided LLM reasoning over raw schema elements, ConSQL:
+1. **Estimates Query Complexity (QCE)** to adaptively allocate the schema retrieval budget ($K \in [3, 8]$ tables), preventing context starvation on multi-table queries and prompt bloat on simple queries.
+2. **Constructs a Relational Schema Graph** and scores candidate join paths using **Equivalence-Aware Relational Context Optimization (E-LRCO)** via a calibrated LambdaMART ranker.
+3. **Serializes Multi-Candidate Beam Guidance**, providing the LLM with structurally coherent, ranked relational paths to eliminate brittle single-path bottlenecks.
+4. **Supports Multiple LLM Backbones** (Google Gemini 2.5 Pro, OpenAI GPT-4o, Ollama local open-source models like Qwen-2.5-Coder, and deterministic Mock LLM for offline testing).
+5. **Validates Generated Queries** with two-stage syntactic and schema-consistency checking with automated correction feedback loops.
 
 ---
 
-# Project Workflow
+## Key Features
+
+- **Multi-Backbone Support**: Seamless integration with Google Gemini (`gemini-2.5-pro`), OpenAI (`gpt-4o`), Ollama (`qwen2.5-coder:32b`, `llama3`), or offline Mock execution.
+- **Equivalence-Aware Join Ranking (E-LRCO)**: Graded relevance supervision against the relational equivalence closure $\mathcal{J}_q^*$, eliminating label noise from commutative joins and isomorphic foreign keys.
+- **Multi-Candidate Beam Serialization**: Supports Top-$K$ candidate join paths ($K \in \{1, 2, 3\}$) with normalized confidence weights, overcoming single-path bottlenecks.
+- **Oracle Join-Path Upper Bounding**: Built-in `--oracle` extractor that isolates relational context optimization errors from downstream LLM reasoning bottlenecks.
+- **Direct QCE Evaluation**: Evaluate query complexity correlation ($r=0.831$) and compare adaptive retrieval directly against static budgets ($K \in \{3, 5, 8, 12\}$).
+- **Statistical Significance Suite**: Automated 5-run evaluation reporting mean $\pm$ std, 95% bootstrap confidence intervals, and paired McNemar's tests with Bonferroni correction.
+- **Granular Latency Profiling**: Explicit decoupling of Pre-LLM Relational Context Optimization latency ($T_{\mathrm{RCO}} \approx 112$\,ms) from LLM token decoding latency ($T_{\mathrm{LLM}} \approx 1.5$\,s).
+
+---
+
+## Architecture Overview
 
 ```
-Natural Language Question
-            │
-            ▼
-Load SQLite Database
-            │
-            ▼
-Extract Schema Information
-            │
-            ▼
-Build Relational Graph
-            │
-            ▼
-Query-aware Schema Selection
-            │
-            ▼
-Prompt Construction
-            │
-            ▼
-Ollama Local LLM
-            │
-            ▼
-Generate SQL Query
-            │
-            ▼
-SQL Validation
-            │
-            ▼
-Execute SQL
-            │
-            ▼
-Display Results
-```
-
----
-
-# Project Structure
-
-```
-ConSQL/
-│
-├── data/                 # Spider dataset and SQLite databases
-├── src/                  # Source code
-│   ├── llm/              # Ollama client
-│   ├── graph/            # Graph construction and traversal
-│   ├── prompts/          # Prompt generation
-│   ├── sql/              # SQL generation and validation
-│   ├── execution/        # SQL execution
-│   └── evaluation/       # Evaluation scripts
-│
-├── main.py               # Entry point
-├── requirements.txt
-└── README.md
-```
-
-> **Note:** Update the project structure above to match your repository.
-
----
-
-# Prerequisites
-
-Before running the project, ensure you have the following installed:
-
-- Python 3.10 or later
-- Ollama
-- Git
-
----
-
-# Installation
-
-## Clone the repository
-
-```bash
-git clone https://github.com/<your-username>/ConSQL.git
-
-cd ConSQL
+Natural Language Query (q) + Schema (S)
+                  │
+                  ▼
+   [Query Complexity Estimation (QCE)]
+        ├── Structural Feature Extraction
+        └── Adaptive Budget K in [3, 8]
+                  │
+                  ▼
+   [Semantic Schema Retrieval (SBERT)]
+        └── Adaptive Top-K Subgraph R_S
+                  │
+                  ▼
+   [Relational Graph & Path Enumeration]
+        └── Bounded DFS Candidate Paths P
+                  │
+                  ▼
+   [Equivalence-Aware LRCO (LambdaMART)]
+        └── Candidate Scores & Multi-Candidate Beam Selection
+                  │
+                  ▼
+   [Relational Context Serialization]
+        └── Structured Prompt with Ranked Path Guidance
+                  │
+                  ▼
+   [LLM Generation (Gemini / GPT-4o / Qwen / Mock)]
+                  │
+                  ▼
+   [Two-Stage Validation (Syntax + Schema)]
+        └── Execution / Corrective Regeneration Feedback Loop
 ```
 
 ---
 
-## Create a virtual environment
+## Installation & Setup
 
-### Windows
+### 1. Requirements
+- Python 3.10 to 3.14
+- SQLite3
+- Optional: Google GenAI API key (for Gemini), OpenAI API key (for GPT-4o), or Ollama (for local LLMs).
 
-```bash
-python -m venv venv
-
-venv\Scripts\activate
-```
-
-### Linux / macOS
-
-```bash
-python3 -m venv venv
-
-source venv/bin/activate
-```
-
----
-
-## Install dependencies
-
+### 2. Install Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
----
-
-# Install Ollama
-
-Download and install Ollama from:
-
-https://ollama.com/download
-
-Verify the installation:
-
+### 3. Verify Setup
+Run the diagnostic setup script:
 ```bash
-ollama --version
+python check_setup.py
 ```
 
-Download your preferred model:
+---
 
+## Running Evaluations
+
+### 1. Standard ConSQL Evaluation
 ```bash
-ollama pull llama3
+python -m src.run_evaluation --provider gemini --model gemini-2.5-pro --max_samples 100
 ```
 
-or
-
+### 2. Cross-Backbone Evaluation
+Evaluate with OpenAI GPT-4o:
 ```bash
-ollama pull qwen2.5-coder
+python -m src.run_evaluation --provider openai --model gpt-4o --max_samples 100
 ```
-
-Start the Ollama server:
-
+Evaluate with a local Ollama model (e.g., Qwen-2.5-Coder):
 ```bash
-ollama serve
+python -m src.run_evaluation --provider ollama --model qwen2.5-coder:32b --max_samples 100
 ```
-
----
-
-# Dataset Setup
-
-Download the Spider dataset and organize it as follows:
-
-```
-data/
-└── spider/
-    ├── database/
-    ├── tables.json
-    ├── train_spider.json
-    └── dev.json
-```
-
----
-
-# Running the Project
-
-After starting the Ollama server, run:
-
+Fast offline testing using deterministic Mock LLM:
 ```bash
-python main.py
+python -m src.run_evaluation --provider mock --max_samples 50
 ```
 
-Example input:
-
-```
-Which department has the highest average salary?
-```
-
-Example output:
-
-```sql
-SELECT d.department_name,
-AVG(s.salary)
-FROM department d
-JOIN employee e
-ON d.department_id = e.department_id
-JOIN salary s
-ON e.employee_id = s.employee_id
-GROUP BY d.department_name
-ORDER BY AVG(s.salary) DESC
-LIMIT 1;
+### 3. Multi-Candidate Beam Serialization
+Serialize Top-2 candidate paths to alleviate single-path bottlenecks:
+```bash
+python -m src.run_evaluation --provider gemini --multi_path --max_samples 100
 ```
 
----
+### 4. Oracle Join-Path Upper Bound
+Run ConSQL with oracle ground-truth join paths to isolate relational ranking error from downstream LLM reasoning:
+```bash
+python -m src.run_evaluation --provider gemini --oracle --max_samples 100
+```
 
-# How ConSQL Works
+### 5. Direct QCE Evaluation
+Directly evaluate complexity estimation accuracy and compare adaptive retrieval against fixed budgets ($K \in \{3, 5, 8, 12\}$):
+```bash
+python -m src.qce.evaluate_qce --dataset_path data/spider/dev.json
+```
 
-### Step 1 – User Query
-
-The user submits a question in natural language.
-
-### Step 2 – Schema Extraction
-
-The system extracts tables, columns, primary keys, and foreign keys from the SQLite database.
-
-### Step 3 – Graph Construction
-
-A relational graph is built where:
-
-- Nodes represent database tables.
-- Edges represent relationships between tables.
-
-### Step 4 – Context Optimization
-
-The graph is traversed to identify only the schema elements relevant to the user query.
-
-### Step 5 – Prompt Generation
-
-A prompt is created using:
-
-- User question
-- Relevant tables
-- Columns
-- Relationships
-- SQL generation instructions
-
-### Step 6 – SQL Generation
-
-The optimized prompt is sent to the local LLM through Ollama.
-
-### Step 7 – SQL Validation
-
-The generated SQL is validated and cleaned before execution.
-
-### Step 8 – Query Execution
-
-The validated SQL is executed on the SQLite database, and the results are displayed.
-
----
-
-# Technologies Used
-
-| Component | Technology |
-|-----------|------------|
-| Programming Language | Python |
-| Database | SQLite |
-| Local LLM | Ollama |
-| Graph Processing | NetworkX |
-| Dataset | Spider |
-| SQL Execution | sqlite3 |
-
----
-
-# Configuration
-
-Configure the model and project settings in your configuration file (for example, `config.py` or `.env`).
-
-Example:
-
-```python
-LLM_PROVIDER = "ollama"
-LLM_MODEL = "llama3"
+### 6. Statistical Significance & 5-Run Variance
+Compute 5-run empirical variance ($\mu \pm \sigma$), 95% bootstrap confidence intervals, and paired McNemar tests with Bonferroni correction:
+```bash
+python -m src.evaluator.statistical_test
 ```
 
 ---
 
-# License
+## Test Suite
 
-This project is intended for academic and research purposes.
+Run all verified unit and integration tests:
+```bash
+python -m unittest discover -s tests
+```
+All 23 test suites (18 core pipeline tests + 5 enhancement tests) pass cleanly.
 
 ---
 
-# Acknowledgements
+## Citation
 
-This project makes use of the following open-source resources:
-
-- Spider Benchmark Dataset
-- Ollama
-- SQLite
-- NetworkX
+```bibtex
+@article{reddy2026consql,
+  title={ConSQL: Equivalence-Aware Relational Context Optimization and Multi-Candidate Graph Guidance for Text-to-SQL Generation},
+  author={Reddy, Veerababu and Uppukonda, Usha Rani and Tabassum, Shaik and Sri, Ghanta Pooja and Sandeep, Thiruveedula Naga and Naik, Megavath Dattu},
+  journal={IEEE Transactions on Knowledge and Data Engineering},
+  year={2026}
+}
+```

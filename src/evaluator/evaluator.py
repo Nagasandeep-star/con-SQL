@@ -3,7 +3,7 @@
 import json
 import os
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Optional
 
 from src.config import BIRD_DB_DIR, SPIDER_DB_DIR
@@ -22,6 +22,8 @@ class EvaluationResult:
     execution_success: bool
     exact_match: bool
     execution_time: float
+    join_path: List[str] = field(default_factory=list)
+    latency_breakdown: Dict[str, float] = field(default_factory=dict)
 
 
 class ConSQLEvaluator:
@@ -43,7 +45,13 @@ class ConSQLEvaluator:
     def compute_exact_match(self, predicted: str, gold: str) -> bool:
         return self.normalize(predicted) == self.normalize(gold)
 
-    def evaluate(self, samples, schemas: Dict, max_samples: Optional[int] = None) -> Dict:
+    def evaluate(
+        self,
+        samples,
+        schemas: Dict,
+        max_samples: Optional[int] = None,
+        use_oracle: bool = False,
+    ) -> Dict:
         """Run the pipeline for each sample and retain the existing metrics."""
         if max_samples is not None:
             samples = samples[:max_samples]
@@ -54,28 +62,39 @@ class ConSQLEvaluator:
         executable_queries = 0
         self.results = []
 
+        from src.graph.oracle_join_path import OracleJoinPathExtractor
+
         for index, sample in enumerate(samples, start=1):
-            print(f"\n[{index}/{len(samples)}] {sample.question}")
             schema = schemas.get(sample.db_id)
             if schema is None:
-                print("Schema not found.")
                 continue
 
             database_path = self.database_path_for(sample.db_id)
             if database_path is None:
-                print(f"Database not found for db_id: {sample.db_id}")
                 continue
+
+            oracle_path = None
+            if use_oracle and hasattr(sample, "query") and sample.query:
+                oracle_path = OracleJoinPathExtractor.get_oracle_join_path(sample.query, schema)
 
             try:
                 started_at = time.time()
-                pipeline_result = self.pipeline.run(
-                    question=sample.question,
-                    schema=schema,
-                    database_path=database_path,
-                )
+                try:
+                    pipeline_result = self.pipeline.run(
+                        question=sample.question,
+                        schema=schema,
+                        database_path=database_path,
+                        oracle_path=oracle_path,
+                    )
+                except TypeError:
+                    pipeline_result = self.pipeline.run(
+                        question=sample.question,
+                        schema=schema,
+                        database_path=database_path,
+                    )
                 elapsed = time.time() - started_at
             except Exception as error:
-                print(f"Prediction failed: {error}")
+                print(f"Prediction failed for sample {index}: {error}")
                 continue
 
             result = self._to_evaluation_result(
@@ -122,6 +141,12 @@ class ConSQLEvaluator:
         execution = pipeline_result.execution_result
         predicted_sql = pipeline_result.generated_sql
 
+        join_tables = (
+            pipeline_result.selected_path.path.path_table_names
+            if pipeline_result.selected_path
+            else []
+        )
+
         return EvaluationResult(
             question=pipeline_result.question,
             db_id=pipeline_result.graph.db_id,
@@ -131,6 +156,8 @@ class ConSQLEvaluator:
             execution_success=execution.success if execution else False,
             exact_match=self.compute_exact_match(predicted_sql, gold_sql),
             execution_time=execution_time,
+            join_path=join_tables,
+            latency_breakdown=pipeline_result.latency_breakdown,
         )
 
     def save_results(self, output_file: str):

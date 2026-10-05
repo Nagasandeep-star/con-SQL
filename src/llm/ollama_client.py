@@ -15,16 +15,18 @@ from src.config import (
 
 from src.llm.base_client import BaseLLMClient
 
+from typing import Optional
+
 logger = logging.getLogger(__name__)
 
 
 class OllamaClient(BaseLLMClient):
 
-    def __init__(self):
+    def __init__(self, model_name: Optional[str] = None, base_url: Optional[str] = None):
 
-        self.model_name = LLM_MODEL
+        self.model_name = model_name or LLM_MODEL
 
-        self.base_url = OLLAMA_BASE_URL
+        self.base_url = base_url or OLLAMA_BASE_URL
 
         logger.info(
             f"Ollama model loaded: {self.model_name}"
@@ -49,8 +51,7 @@ class OllamaClient(BaseLLMClient):
                             "temperature": 0,
                             "num_predict": 256,
                         },
-                    }
-
+                    },
                     timeout=300,
 
                 )

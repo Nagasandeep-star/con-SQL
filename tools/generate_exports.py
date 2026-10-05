@@ -31,7 +31,7 @@ def try_plot(metrics_path, out_png):
     try:
         import matplotlib.pyplot as plt
     except Exception:
-        print('matplotlib not available — skipping plot')
+        print('matplotlib not available -- skipping plot')
         return False
 
     with open(metrics_path, 'r', encoding='utf-8') as f:

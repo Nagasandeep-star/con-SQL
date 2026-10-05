@@ -11,33 +11,51 @@ import sys, os, time
 import socket
 import logging
 from pathlib import Path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
+
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+SRC_DIR = os.path.join(CURRENT_DIR, "src")
+for p in (CURRENT_DIR, SRC_DIR):
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
 import gradio as gr
-from config import (
+
+from src.config import (
     SPIDER_DIR,
     BIRD_MINIDEV_DIR,
-    SBERT_MODEL,
-    SIMILARITY_THRESHOLD,
-    ALPHA,
-    BETA,
-    DEVICE,
+    SPIDER_DB_DIR,
+    BIRD_DB_DIR,
     MAX_JOIN_DEPTH,
-    MAX_PATHS,
-    SCORE_ALPHA,
-    SCORE_BETA,
-    SCORE_LAMBDA,
-    T5_MODEL,
-    MAX_INPUT_LENGTH,
-    MAX_TARGET_LENGTH,
-    BEAM_SIZE,
-    MODEL_SAVE_DIR
+    LLM_PROVIDER,
+    LLM_MODEL,
 )
+from src.data_loader import SpiderDataLoader
+from src.bird_loader import BIRDMiniDevLoader
+from src.retrieval.schema_linker import SBERTSchemaLinker
+from src.graph.graph_builder import SchemaGraphBuilder
+from src.graph.path_generator import PathGenerator
+from src.graph.path_scorer import PathScorer
+from src.llm.sql_generator import SQLGenerator
+from src.llm.prompt_builder import PromptContext
+from src.validator.sql_validator import SQLValidator
+from src.executor.sql_executor import SQLExecutor
+from src.pipeline.service import ConSQLPipeline
 
-# ── Lazy-load pipeline (loaded once on startup) ───────────────
+# Model & algorithm hyperparameters
+SBERT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+SIMILARITY_THRESHOLD = 0.3
+ALPHA = 0.6
+BETA = 0.4
+DEVICE = "cpu"
+MAX_PATHS = 50
+SCORE_ALPHA = 0.4
+SCORE_BETA = 0.4
+SCORE_LAMBDA = 0.2
+
+# -- Lazy-load pipeline (loaded once on startup) ---------------
 _pipeline = None
 
 def load_pipeline():
@@ -46,47 +64,50 @@ def load_pipeline():
         return _pipeline
 
     print("Loading ConSQL pipeline...")
-    from data_loader import SpiderDataLoader
-    from bird_loader import BIRDMiniDevLoader
-    from schema_linker import SBERTSchemaLinker
-    from graph_builder import SchemaGraphBuilder
-    from path_generator import PathGenerator
-    from path_scorer import PathScorer
-    from sql_generator import T5SQLGenerator
 
     # Load schemas from both datasets
     all_schemas = {}
 
-    spider_loader = SpiderDataLoader(SPIDER_DIR)
-    spider_schemas = spider_loader.load_schemas()
-    all_schemas.update(spider_schemas)
-    print(f"  Spider: {len(spider_schemas)} schemas")
+    if os.path.exists(SPIDER_DIR):
+        try:
+            spider_loader = SpiderDataLoader(spider_dir=str(SPIDER_DIR))
+            spider_schemas = spider_loader.load_schemas()
+            all_schemas.update(spider_schemas)
+            print(f"  Spider: {len(spider_schemas)} schemas")
+        except Exception as e:
+            logger.warning(f"Could not load Spider schemas: {e}")
 
     if os.path.exists(BIRD_MINIDEV_DIR):
-        bird_loader = BIRDMiniDevLoader(BIRD_MINIDEV_DIR)
-        bird_schemas = bird_loader.load_schemas()
-        all_schemas.update(bird_schemas)
-        print(f"  BIRD:   {len(bird_schemas)} schemas")
+        try:
+            bird_loader = BIRDMiniDevLoader(bird_minidev_dir=str(BIRD_MINIDEV_DIR))
+            bird_schemas = bird_loader.load_schemas()
+            all_schemas.update(bird_schemas)
+            print(f"  BIRD:   {len(bird_schemas)} schemas")
+        except Exception as e:
+            logger.warning(f"Could not load BIRD schemas: {e}")
 
     # Build pipeline components
-    linker    = SBERTSchemaLinker(
+    linker = SBERTSchemaLinker(
         model_name=SBERT_MODEL,
         similarity_threshold=SIMILARITY_THRESHOLD,
         alpha=ALPHA, beta=BETA, device=DEVICE
     )
-    builder   = SchemaGraphBuilder(linker=linker)
+    builder = SchemaGraphBuilder(linker=linker)
     generator = PathGenerator(max_depth=MAX_JOIN_DEPTH, max_paths=MAX_PATHS)
-    scorer    = PathScorer(alpha=SCORE_ALPHA, beta=SCORE_BETA,
-                           lam=SCORE_LAMBDA, max_depth=MAX_JOIN_DEPTH)
+    scorer = PathScorer(alpha=SCORE_ALPHA, beta=SCORE_BETA,
+                        lam=SCORE_LAMBDA, max_depth=MAX_JOIN_DEPTH)
+    sql_gen = SQLGenerator(provider=LLM_PROVIDER, model=LLM_MODEL)
+    validator = SQLValidator()
+    executor = SQLExecutor()
 
-    # Load T5 (fine-tuned if available, else base)
-    sql_gen = T5SQLGenerator(
-        model_name=T5_MODEL,
-        model_save_dir=MODEL_SAVE_DIR,
-        max_input_len=MAX_INPUT_LENGTH,
-        max_target_len=MAX_TARGET_LENGTH,
-        beam_size=BEAM_SIZE,
-        device=DEVICE
+    pipeline = ConSQLPipeline(
+        linker=linker,
+        graph_builder=builder,
+        path_generator=generator,
+        path_scorer=scorer,
+        sql_generator=sql_gen,
+        validator=validator,
+        executor=executor,
     )
 
     _pipeline = {
@@ -96,12 +117,15 @@ def load_pipeline():
         "generator": generator,
         "scorer":    scorer,
         "sql_gen":   sql_gen,
+        "validator": validator,
+        "executor":  executor,
+        "pipeline":  pipeline,
     }
-    print("✅ Pipeline loaded.")
+    print("[OK] Pipeline loaded.")
     return _pipeline
 
 
-# ── Core pipeline runner ──────────────────────────────────────
+# -- Core pipeline runner --------------------------------------
 
 def run_pipeline(question: str, db_id: str):
     """
@@ -109,7 +133,7 @@ def run_pipeline(question: str, db_id: str):
     Returns step-by-step outputs for display in the UI.
     """
     if not question.strip():
-        return ("", "", None, "", "", "", "", "❌ Please enter a question.", "")
+        return ("", "", None, "", "", "", "", "[FAIL] Please enter a question.", "")
 
     p = load_pipeline()
     schemas   = p["schemas"]
@@ -118,33 +142,46 @@ def run_pipeline(question: str, db_id: str):
     generator = p["generator"]
     scorer    = p["scorer"]
     sql_gen   = p["sql_gen"]
+    validator = p["validator"]
+    executor  = p["executor"]
 
     schema = schemas.get(db_id)
     if schema is None:
+        target = db_id.strip().lower() if db_id else ""
+        for s_id, s in schemas.items():
+            if s_id.lower() == target or target in s_id.lower() or s_id.lower() in target:
+                db_id = s_id
+                schema = s
+                break
+    if schema is None and schemas:
+        db_id = "concert_singer" if "concert_singer" in schemas else next(iter(schemas.keys()))
+        schema = schemas[db_id]
+
+    if schema is None:
         return ("", "", None, "", "", "", "",
-                f"❌ Database '{db_id}' not found.\n"
+                f"[FAIL] Database '{db_id}' not found.\n"
                 f"Available: {', '.join(list(schemas.keys())[:10])}...",
                 "")
 
     timings = {}
 
     try:
-        # ── Step 1: Schema Linking ────────────────────────────
+        # -- Step 1: Schema Linking ----------------------------
         t0 = time.perf_counter()
         linking = linker.link(question, schema)
         timings["Schema Linking"] = time.perf_counter() - t0
 
-        step1_out = f"📌 Relevant Tables ({len(linking.relevant_tables)}):\n"
+        step1_out = f"  Relevant Tables ({len(linking.relevant_tables)}):\n"
         for ts in linking.relevant_tables:
-            bar = "█" * int(ts.score * 20)
+            bar = " " * int(ts.score * 20)
             step1_out += f"  [{ts.score:.3f}] {ts.table.name_original:<25} {bar}\n"
 
-        step1_out += f"\n📌 Relevant Columns ({len(linking.relevant_columns)}):\n"
+        step1_out += f"\n  Relevant Columns ({len(linking.relevant_columns)}):\n"
         for cs in linking.relevant_columns[:8]:
             step1_out += (f"  [{cs.score:.3f}] "
                           f"{cs.table.name_original}.{cs.column.name_original}\n")
 
-        # ── Step 2: Schema Graph ──────────────────────────────
+        # -- Step 2: Schema Graph ------------------------------
         t0 = time.perf_counter()
         sg_aware = builder.build(schema, linking_result=linking)
         timings["Graph Building"] = time.perf_counter() - t0
@@ -161,29 +198,29 @@ def run_pipeline(question: str, db_id: str):
         logger.info(f"Generated nodes: {[(nid, sg_aware.table_id_to_name[nid], sg_aware.get_node_weight(nid)) for nid in sg_aware.graph.nodes()]}")
         logger.info(f"Generated edges with weights: {[ (e[0], e[1], e[2], e[3]) for e in edge_descriptions ]}")
 
-        step2_out = f"🔗 Schema Graph for [{db_id}]\n"
+        step2_out = f"  Schema Graph for [{db_id}]\n"
         step2_out += f"  Nodes (tables) : {sg_aware.graph.number_of_nodes()}\n"
         step2_out += f"  Edges (FK)     : {sg_aware.graph.number_of_edges()}\n\n"
         step2_out += "  FK Relationships:\n"
         for n1, n2, w, fk_desc in edge_descriptions:
-            step2_out += f"  {n1:<22} ↔  {n2:<22} (w={w:.3f}, FK={fk_desc})\n"
+            step2_out += f"  {n1:<22}    {n2:<22} (w={w:.3f}, FK={fk_desc})\n"
 
-        # ── Step 3: Path Generation ───────────────────────────
+        # -- Step 3: Path Generation ---------------------------
         t0 = time.perf_counter()
         path_result = generator.generate(sg_aware, linking, schema)
         timings["Path Generation"] = time.perf_counter() - t0
 
-        step3_out = (f"🔍 Generated {len(path_result.all_paths)} total paths\n"
-                     f"  ✅ Valid   : {path_result.num_valid}\n"
-                     f"  ❌ Invalid : {path_result.num_invalid}\n\n"
+        step3_out = (f"  Generated {len(path_result.all_paths)} total paths\n"
+                     f"  [OK] Valid   : {path_result.num_valid}\n"
+                     f"  [FAIL] Invalid : {path_result.num_invalid}\n\n"
                      f"  All Valid Paths:\n")
         for i, path in enumerate(path_result.valid_paths[:12]):
-            pstr = " → ".join(path.path_table_names)
+            pstr = " -> ".join(path.path_table_names)
             step3_out += f"  [{i+1:>2}] {pstr}\n"
         if path_result.num_valid > 12:
             step3_out += f"  ... and {path_result.num_valid - 12} more\n"
 
-        # ── Step 4: Constraint Scoring ────────────────────────
+        # -- Step 4: Constraint Scoring ------------------------
         t0 = time.perf_counter()
         sel = scorer.score_and_select(path_result, sg_aware, linking)
         timings["Scoring"] = time.perf_counter() - t0
@@ -192,60 +229,96 @@ def run_pipeline(question: str, db_id: str):
         if sel.best_path is None:
             raise RuntimeError("No valid join path found.")
 
-        step4_out = (f"📊 Constraint Scoring\n"
-                     f"  Formula: Score = α·S_sem + β·S_struct − λ·L(p)\n"
-                     f"  Weights: α={SCORE_ALPHA}, β={SCORE_BETA}, λ={SCORE_LAMBDA}\n\n"
+        step4_out = (f"  Constraint Scoring\n"
+                     f"  Formula: Score =   S_sem +   S_struct     L(p)\n"
+                     f"  Weights:  ={SCORE_ALPHA},  ={SCORE_BETA},  ={SCORE_LAMBDA}\n\n"
                      f"  {'#':<4} {'Score':>6}  {'Sem':>6}  {'Struct':>6}  {'Pen':>6}  Path\n"
-                     f"  {'─'*70}\n")
+                     f"  {'-'*70}\n")
         for i, sp in enumerate(sel.scored_paths[:8]):
-            pstr   = " → ".join(sp.path.path_table_names)
-            marker = "🏆" if i == 0 else "  "
+            pstr   = " -> ".join(sp.path.path_table_names)
+            marker = " " if i == 0 else "  "
             step4_out += (f"  {marker}[{i+1}] {sp.final_score:>6.3f}  "
                           f"{sp.sem_score:>6.3f}  "
                           f"{sp.struct_score:>6.3f}  "
                           f"{sp.length_penalty:>6.3f}  {pstr}\n")
 
-        # ── Step 5: Best Path ─────────────────────────────────
+        # -- Step 5: Best Path ---------------------------------
         bp = sel.best_path
         best_path_names = bp.path.path_table_names
         logger.info(f"Final best join path: {[name for name in best_path_names]}")
-        step5_out = (f"🏆 Best Join Path Selected:\n\n"
-                     f"  {' → '.join(best_path_names)}\n\n"
+        step5_out = (f"  Best Join Path Selected:\n\n"
+                     f"  {' -> '.join(best_path_names)}\n\n"
                      f"  Score Breakdown:\n"
-                     f"    α · S_sem     = {SCORE_ALPHA} × {bp.sem_score:.4f} = "
+                     f"        S_sem     = {SCORE_ALPHA}   {bp.sem_score:.4f} = "
                      f"{SCORE_ALPHA * bp.sem_score:.4f}\n"
-                     f"    β · S_struct  = {SCORE_BETA} × {bp.struct_score:.4f} = "
+                     f"        S_struct  = {SCORE_BETA}   {bp.struct_score:.4f} = "
                      f"{SCORE_BETA * bp.struct_score:.4f}\n"
-                     f"    λ · L(p)      = {SCORE_LAMBDA} × {bp.length_penalty:.4f} = "
+                     f"        L(p)      = {SCORE_LAMBDA}   {bp.length_penalty:.4f} = "
                      f"{SCORE_LAMBDA * bp.length_penalty:.4f}\n"
-                     f"    ─────────────────────────────\n"
+                     f"    -----------------------------\n"
                      f"    Final Score   = {bp.final_score:.4f}\n\n"
                      f"  Tables in join: {len(best_path_names)}\n"
                      f"  Join operations: {bp.path.num_joins}")
 
-        # ── Step 6: T5 Prompt ─────────────────────────────────
-        prompt = sql_gen.prompt_builder.build(
-            question, schema, sel, linking
+        # -- Step 6: Context Prompt ----------------------------
+        tables_in_join = best_path_names if best_path_names else [ts.table.name_original for ts in linking.relevant_tables]
+        columns_in_prompt = [f"{cs.table.name_original}.{cs.column.name_original}" for cs in linking.relevant_columns[:8]]
+        prompt_ctx = PromptContext(
+            question=question,
+            db_id=db_id,
+            tables=tables_in_join,
+            columns=columns_in_prompt,
+            join_path=best_path_names,
+            foreign_keys=[f"{e[0]}.{e[3]} -> {e[1]}" for e in edge_descriptions[:5]],
         )
-        step6_out = f"📝 T5 Input Prompt:\n\n{prompt}"
+        prompt = sql_gen.prompt_builder.build(prompt_ctx)
+        step6_out = f"  Context Prompt:\n\n{prompt}"
 
-        # ── Step 7: SQL Generation ────────────────────────────
+        # -- Step 7: SQL Generation ----------------------------
         t0 = time.perf_counter()
-        result = sql_gen.generate_sql(
-            question, schema, sel, linking
-        )
+        try:
+            gen_res = sql_gen.generate(
+                question=question,
+                db_id=db_id,
+                tables=tables_in_join,
+                columns=columns_in_prompt,
+                join_path=best_path_names,
+                foreign_keys=[],
+            )
+            sql_out = gen_res.predicted_sql
+        except Exception as e:
+            logger.warning(f"Default LLM generation failed ({e}), falling back to heuristic preview.")
+            from src.llm.mock_client import MockLLMClient
+            mock_client = MockLLMClient()
+            sql_out = mock_client.generate_sql(prompt)
+            sql_out = f"-- [Note: LLM provider unavailable ({e}); showing pipeline candidate preview]\n{sql_out}"
         timings["LLM Generation"] = time.perf_counter() - t0
 
-        sql_out = result.predicted_sql
-        valid_tag = "✅ Valid SQL" if result.is_valid_sql else "⚠️ Check SQL syntax"
+        val_res = validator.validate(sql_out, schema)
+        valid_tag = "[OK] Valid SQL" if val_res.is_valid else f"[WARN] Check SQL: {val_res.error}"
+
+        db_path = os.path.join(SPIDER_DB_DIR, db_id, f"{db_id}.sqlite")
+        if not os.path.exists(db_path):
+            db_path = os.path.join(BIRD_DB_DIR, db_id, f"{db_id}.sqlite")
+        if not os.path.exists(db_path):
+            db_path = os.path.join(SPIDER_DB_DIR, "concert_singer", "concert_singer.sqlite")
+
+        exec_tag = ""
+        if os.path.exists(db_path):
+            # Signature is execute(database_path: str, sql: str)
+            exec_res = executor.execute(db_path, sql_out)
+            if exec_res.success:
+                exec_tag = f"\n[OK] Executed successfully: {len(exec_res.rows)} rows returned"
+            else:
+                exec_tag = f"\n[WARN] Execution note: {exec_res.error}"
 
         timings["Total"] = sum(timings.values())
         timing_lines = "\n".join(
             f"  {name:<16}: {seconds * 1000:.1f} ms" for name, seconds in timings.items()
         )
-        step7_out = f"{sql_out}\n\n{valid_tag}\n\n⏱️ Timing:\n{timing_lines}"
+        step7_out = f"{sql_out}\n\n{valid_tag}{exec_tag}\n\n   Timing:\n{timing_lines}"
 
-        # ── Plot the graph AFTER scoring, so the best path is known ──
+        # -- Plot the graph AFTER scoring, so the best path is known --
         schema_graph_fig = build_query_graph_figure(sg_aware, linking, bp)
 
         return (step1_out, step2_out, schema_graph_fig, step3_out,
@@ -254,7 +327,7 @@ def run_pipeline(question: str, db_id: str):
     except Exception:
         import traceback
         return ("", "", None, "", "", "", "",
-                f"❌ Pipeline error:\n{traceback.format_exc()}", "")
+                f"[FAIL] Pipeline error:\n{traceback.format_exc()}", "")
 
 
 def build_query_graph_figure(sg_aware, linking, best_path=None):
@@ -326,7 +399,7 @@ def build_query_graph_figure(sg_aware, linking, best_path=None):
             edge_colors.append("#16a34a")
         else:
             edge_colors.append("#64748b")
-        # Only the FK column mapping — the weight is already encoded by edge thickness/color
+        # Only the FK column mapping -- the weight is already encoded by edge thickness/color
         edge_labels[(u, v)] = fk_label if fk_label else f"{weight:.2f}"
 
     display_graph = nx.DiGraph()
@@ -415,7 +488,7 @@ def build_query_graph_figure(sg_aware, linking, best_path=None):
     return fig
 
 
-# ── Build DB dropdown list ────────────────────────────────────
+# -- Build DB dropdown list ------------------------------------
 
 def get_db_list():
     """Get all available database IDs for the dropdown."""
@@ -427,7 +500,7 @@ def get_db_list():
         return ["concert_singer", "department_management"]
 
 
-# ── Gradio UI ────────────────────────────────────────────────
+# -- Gradio UI ------------------------------------------------
 
 def build_demo():
     db_list = get_db_list()
@@ -445,23 +518,24 @@ def build_demo():
         ["List all card games released after 2010.",              "card_games"],
     ]
 
-    with gr.Blocks(
-        title="ConSQL — Constraint-Guided Text-to-SQL",
-        theme=gr.themes.Soft(primary_hue="blue", neutral_hue="slate"),
-        css="""
-        .step-box textarea { font-family: monospace !important; font-size: 13px !important; }
-        .sql-box textarea { font-family: monospace !important; font-size: 15px !important;
-                            background: #1e1e2e !important; color: #cdd6f4 !important; }
-        .title-box { text-align: center; padding: 20px 0 10px 0; }
-        footer { display: none !important; }
-        """
-    ) as demo:
+    all_known_dbs = sorted(list(set(db_list + [ex[1] for ex in examples])))
 
-        # ── Header ───────────────────────────────────────────
+    theme = gr.themes.Soft(primary_hue="blue", neutral_hue="slate")
+    css = """
+    .step-box textarea { font-family: monospace !important; font-size: 13px !important; }
+    .sql-box textarea { font-family: monospace !important; font-size: 15px !important;
+                        background: #1e1e2e !important; color: #cdd6f4 !important; }
+    .title-box { text-align: center; padding: 20px 0 10px 0; }
+    footer { display: none !important; }
+    """
+
+    with gr.Blocks(title="ConSQL -- Constraint-Guided Text-to-SQL") as demo:
+
+        # -- Header -------------------------------------------
         gr.HTML("""
         <div class="title-box">
           <h1 style="font-size:2.2em; color:#1e40af; margin-bottom:4px;">
-            🔍 ConSQL
+              ConSQL
           </h1>
           <p style="font-size:1.1em; color:#475569;">
             Constraint-Guided Join Path Selection for Text-to-SQL
@@ -474,7 +548,7 @@ def build_demo():
         </div>
         """)
 
-        # ── Input Section ─────────────────────────────────────
+        # -- Input Section -------------------------------------
         with gr.Row():
             with gr.Column(scale=3):
                 question_input = gr.Textbox(
@@ -484,17 +558,18 @@ def build_demo():
                 )
             with gr.Column(scale=1):
                 db_dropdown = gr.Dropdown(
-                    choices=db_list,
-                    value=db_list[0] if db_list else "concert_singer",
-                    label="Select Database"
+                    choices=all_known_dbs,
+                    value=all_known_dbs[0] if all_known_dbs else "concert_singer",
+                    label="Select Database",
+                    allow_custom_value=True
                 )
 
         with gr.Row():
-            run_btn   = gr.Button("🚀 Generate SQL", variant="primary", scale=3)
-            clear_btn = gr.Button("🗑️ Clear", scale=1)
+            run_btn   = gr.Button("  Generate SQL", variant="primary", scale=3)
+            clear_btn = gr.Button("   Clear", scale=1)
 
-        # ── Pipeline Steps (tabs — replaces stacked accordions) ─
-        gr.Markdown("### 📋 Pipeline Steps")
+        # -- Pipeline Steps (tabs -- replaces stacked accordions) -
+        gr.Markdown("###   Pipeline Steps")
 
         with gr.Tabs():
             with gr.Tab("Schema Linking"):
@@ -515,7 +590,7 @@ def build_demo():
                                        lines=12, elem_classes=["step-box"])
 
             with gr.Tab("Scoring"):
-                gr.Markdown("*Scores all paths: Score = α·S_sem + β·S_struct − λ·L(p)*")
+                gr.Markdown("*Scores all paths: Score =   S_sem +   S_struct     L(p)*")
                 step4_out = gr.Textbox(label="Scored Paths (ranked)",
                                        lines=12, elem_classes=["step-box"])
 
@@ -526,11 +601,11 @@ def build_demo():
 
             with gr.Tab("Prompt"):
                 gr.Markdown("*Structured prompt combining query + best path + schema context*")
-                step6_out = gr.Textbox(label="T5 Prompt",
+                step6_out = gr.Textbox(label="Serialized Context Prompt",
                                        lines=6, elem_classes=["step-box"])
 
             with gr.Tab("SQL"):
-                gr.Markdown("### 🎯 Generated SQL Query")
+                gr.Markdown("###   Generated SQL Query")
                 step7_out = gr.Textbox(
                     label="Output SQL + Timing",
                     lines=10,
@@ -543,15 +618,15 @@ def build_demo():
                     interactive=False
                 )
 
-        # ── Examples ─────────────────────────────────────────
-        gr.Markdown("### 💡 Example Queries")
+        # -- Examples -----------------------------------------
+        gr.Markdown("###   Example Queries")
         gr.Examples(
             examples=examples,
             inputs=[question_input, db_dropdown],
             label="Click any example to load it"
         )
 
-        # ── Button actions ────────────────────────────────────
+        # -- Button actions ------------------------------------
         run_btn.click(
             fn=run_pipeline,
             inputs=[question_input, db_dropdown],
@@ -565,14 +640,14 @@ def build_demo():
                      step4_out, step5_out, step6_out, step7_out, sql_query_out]
         )
 
-        # ── Footer info ───────────────────────────────────────
+        # -- Footer info ---------------------------------------
         gr.HTML("""
         <div style="text-align:center; padding:20px 0 0 0; color:#94a3b8; font-size:0.85em;">
           Research: Enhancing Text-to-SQL with Constraint-Guided Join Path Selection
         </div>
         """)
 
-    return demo
+    return demo, theme, css
 
 
 def find_open_port(base_port: int = 7860, max_port: int = 7880) -> int:
@@ -585,6 +660,15 @@ def find_open_port(base_port: int = 7860, max_port: int = 7880) -> int:
             except OSError:
                 continue
     raise OSError(f"No open port found in range {base_port}-{max_port}")
+
+
+def get_local_ip() -> str:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except Exception:
+        return "127.0.0.1"
 
 
 if __name__ == "__main__":
@@ -603,12 +687,17 @@ if __name__ == "__main__":
         print(f"\n  ERROR: {exc}")
         raise
 
+    local_ip = get_local_ip()
     print(f"\n  Starting Gradio interface on port {server_port}...")
-    print(f"  Open your browser at: http://localhost:{server_port}\n")
-    demo = build_demo()
+    print(f"  This PC (Local):     http://localhost:{server_port}")
+    print(f"  All Devices (Wi-Fi): http://{local_ip}:{server_port}\n")
+    demo, theme, css = build_demo()
+    share_public = os.environ.get("GRADIO_SHARE", "false").lower() in ("1", "true", "yes")
     demo.launch(
         server_name="0.0.0.0",
         server_port=server_port,
-        share=False,
+        theme=theme,
+        css=css,
+        share=share_public,
         show_error=True
     )

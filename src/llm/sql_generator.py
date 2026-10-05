@@ -16,7 +16,9 @@ Returns generated SQL.
 """
 
 from dataclasses import dataclass, field
+from typing import Optional, List, Dict, Any
 
+from src.llm.base_client import BaseLLMClient
 from src.llm.prompt_builder import (
     PromptBuilder,
     PromptContext,
@@ -67,13 +69,14 @@ class SQLGenerator:
     4. Return structured result
     """
 
-    def __init__(self):
-
+    def __init__(
+        self,
+        llm_client: Optional[BaseLLMClient] = None,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+    ):
         self.prompt_builder = PromptBuilder()
-
-        # Automatically selects the provider
-        # specified in config.py/.env
-        self.llm_client = LLMFactory.create()
+        self.llm_client = llm_client or LLMFactory.create(provider=provider, model=model)
 
     def generate(
         self,

@@ -144,7 +144,7 @@ def evaluate(predictions_path: str, data_root: str, out_path: str = None) -> dic
         if n_gold == n_pred:
             em_correct += 1
         
-        # Execution Accuracy — attempt execution on sqlite DB
+        # Execution Accuracy -- attempt execution on sqlite DB
         db_file = get_db_path(data_root, db_id)
         if os.path.exists(db_file):
             ok_pred, pred_rows = execute_sql(db_file, pred_sql)
@@ -154,7 +154,7 @@ def evaluate(predictions_path: str, data_root: str, out_path: str = None) -> dic
                 if ok_gold and pred_rows == gold_rows:
                     ex_correct += 1
 
-        # Join Path accuracy — compare predicted join path tables to tables in gold SQL
+        # Join Path accuracy -- compare predicted join path tables to tables in gold SQL
         gold_tables = extract_tables(gold_sql or "")
         pred_tables = []
 

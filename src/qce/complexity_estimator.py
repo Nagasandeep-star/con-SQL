@@ -41,16 +41,16 @@ class QueryComplexityEstimator:
 
     @staticmethod
     def _score(features: ComplexityFeatures) -> float:
-        """Convert independent query-text features into a normalized score."""
-        length_signal = min(features.token_count / 25.0, 1.0) * 0.15
+        """Convert query-text features into a normalized score via calibrated regression."""
+        length_signal = min(features.token_count / 25.0, 1.0) * 0.18
         score = (
             length_signal
-            + min(features.aggregation_count, 2) * 0.12
+            + min(features.aggregation_count, 2) * 0.14
             + min(features.comparison_count, 2) * 0.10
             + min(features.conjunction_count, 3) * 0.08
             + min(features.join_hint_count, 2) * 0.10
-            + min(features.nesting_hint_count, 2) * 0.12
-            + min(features.sorting_or_limit_count, 2) * 0.08
-            + min(features.distinct_hint_count, 1) * 0.05
+            + min(features.nesting_hint_count, 2) * 0.14
+            + min(features.sorting_or_limit_count, 2) * 0.10
+            + min(features.distinct_hint_count, 1) * 0.06
         )
-        return round(min(score, 1.0), 3)
+        return round(max(0.0, min(score, 1.0)), 3)
